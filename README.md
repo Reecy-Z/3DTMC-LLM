@@ -4,9 +4,19 @@
 
 ![Graphical abstract](abstract_graphic.png)
 
-*High-resolution source: [`Abstract Graphics.tif`](Abstract%20Graphics.tif) (print / submission).*
-
 This repository implements a **3D encoder** (BOS / global geometry token) fused with a **causal LLM** — by default **[Qwen/Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507)** — for generative tasks on transition metal complexes (TMCs). The stack is trained in stages: **3D encoder pretraining → Stage 1 (frozen LLM) → Stage 2 (LLM + LoRA + continued 3D alignment)**, then **downstream fine-tuning** on property prediction, barrier regression, and related tasks.
+
+### Environment
+
+```bash
+pip install -r requirements.txt
+```
+
+#### Uni-Core
+
+Training and inference import **`unicore`** (e.g. `Dictionary` and the distributed framework). Install **Uni-Core** from source or wheels as documented in the upstream repo:
+
+**[https://github.com/dptech-corp/Uni-Core](https://github.com/dptech-corp/Uni-Core)**
 
 ---
 
@@ -22,7 +32,7 @@ Download the weights and data from those collections and point the training scri
 
 Downstream **Stage 1 / 2 / Property / NiComplex / Vaska** code expects **pretrained 3D encoder weights** and a **`dict.txt`** atom vocabulary consistent with your OMol / tmQM pipeline.
 
-### Option A — use our pretrained encoder (recommended)
+### Option A — use our pretrained encoder
 
 Load the encoder weights from **[Reecy/TMC](https://huggingface.co/Reecy/TMC)** and pass the path via the **Stage 1 geometry-encoder argument** (see `Stage1.py --help`). For Stage 3–style scripts, ensure the **encoder state file** inside `init_ckpt` matches that release. Use the **`dict.txt`** bundled with the same OMol25 / training setup (see `train_defaults.py` for typical paths).
 
@@ -155,6 +165,7 @@ CUDA_VISIBLE_DEVICES=0 python inference_demo.py \
 | `Property.py` / `NiComplex.py` / `Vaska_Complex.py` | Downstream SFT |
 | `inference_demo.py` | Generic BOS + 3D generation demo |
 | `train_defaults.py` | Default paths and hyperparameters |
+| `requirements.txt` | Python dependencies (after PyTorch) |
 
 ---
 
