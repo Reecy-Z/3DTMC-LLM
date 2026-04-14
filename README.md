@@ -2,6 +2,10 @@
 
 **3DTMC-LLM: Bridging 3D Geometry and Large Language Models for Transition Metal Complexes**
 
+![Graphical abstract](abstract_graphic.png)
+
+*High-resolution source: [`Abstract Graphics.tif`](Abstract%20Graphics.tif) (print / submission).*
+
 This repository implements a **3D encoder** (BOS / global geometry token) fused with a **causal LLM** — by default **[Qwen/Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507)** — for generative tasks on transition metal complexes (TMCs). The stack is trained in stages: **3D encoder pretraining → Stage 1 (frozen LLM) → Stage 2 (LLM + LoRA + continued 3D alignment)**, then **downstream fine-tuning** on property prediction, barrier regression, and related tasks.
 
 ---
