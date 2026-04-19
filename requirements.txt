@@ -1,0 +1,20 @@
+# 1) Install PyTorch for your CUDA version first, e.g.:
+#    pip install torch --index-url https://download.pytorch.org/whl/cu121
+# 2) Then:
+#    pip install -r requirements.txt
+#
+# Uni-Core (unicore) is not listed here — install from source or wheels:
+#   https://github.com/dptech-corp/Uni-Core
+
+transformers>=4.44.0
+accelerate>=0.33.0
+peft>=0.11.0
+safetensors>=0.4.0
+deepspeed>=0.14.0
+bitsandbytes>=0.43.0
+wandb>=0.16.0
+tqdm>=4.66.0
+numpy>=1.22
+scipy>=1.10
+lmdb>=1.4.0
+rdkit>=2023.3.1
