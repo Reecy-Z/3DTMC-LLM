@@ -4,7 +4,7 @@
 
 ![Graphical abstract](abstract_graphic.png)
 
-This repository implements a **3D encoder** (BOS / global geometry token) fused with a **causal LLM** — by default **[Qwen/Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507)** — for generative tasks on transition metal complexes (TMCs). The stack is trained in stages: **3D encoder pretraining → Stage 1 (frozen LLM) → Stage 2 (LLM + LoRA + continued 3D alignment)**, then **downstream fine-tuning** on property prediction, barrier regression, and related tasks.
+This repository implements a **3D encoder** fused with a **causal LLM** — by default **[Qwen/Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507)** — for generative tasks on transition metal complexes (TMCs). The stack is trained in stages: **3D encoder pretraining → Stage 1 (frozen LLM) → Stage 2 (LLM + LoRA + continued 3D alignment)**, then **downstream fine-tuning** on property prediction, barrier regression, and related tasks.
 
 ### Environment
 
@@ -70,7 +70,7 @@ Load the encoder from **[Reecy/3DTMC-LLM/3D_encoder_pretrain](https://huggingfac
 
 ---
 
-## 2. Stage 1 — BOS projection, frozen LLM
+## 2. Stage 1
 
 **Script:** `Stage1.py`  
 
@@ -90,7 +90,7 @@ Defaults are centralized in **`train_defaults.py`** (`STAGE1_DEFAULTS`).
 
 ---
 
-## 3. Stage 2 — LLM + LoRA + mixed 3D / text
+## 3. Stage 2
 
 **Script:** `Stage2.py`  
 
@@ -111,9 +111,9 @@ Defaults: **`train_defaults.py`** (`STAGE2_DEFAULTS`).
 
 ---
 
-## 4. Downstream tasks
+## 4. Stage 3 (Downstream tasks)
 
-**`Property.py`**, **`NiComplex.py`**, and **`Vaska_Complex.py`** use the **BOS-only generative** recipe: **LoRA + 3D encoder + BOS projection**, initialized from a **Stage 2 `init_ckpt`** (HF adapter + encoder weights + BOS projection tensors). The implementation lives in the shared **geometry + Qwen** model module imported by all training scripts.
+**`Property.py`**, **`NiComplex.py`**, and **`Vaska_Complex.py`** initialized from a **Stage 2 `init_ckpt`** (HF adapter + encoder weights + single-token projection weights).
 
 For **Vaska_Complex**, we provide a **ready-made LMDB** (`data.lmdb`) on the Hub at **[Reecy/3DTMC-LLM/vaskas-space](https://huggingface.co/Reecy/3DTMC-LLM/tree/main/vaskas-space)** so you can run the task.
 
