@@ -33,18 +33,18 @@ Checkpoints and Stage 1 data for **3DTMC-LLM** are published on Hugging Face und
 
 **Building datasets / text corpora**
 
-- **`enrich_description.py`** — starting from an LMDB with **`description`** and **`smiles`**, calls an OpenAI-compatible LLM (single-request inference) and writes polished text to **`enriched_description`**. Use this workflow to build a **TMC-Prop3D-Enriched** dataset (enriched descriptions in LMDB) for Stage 2 training.
+- **`enrich_description.py`** — starting from an LMDB with **`description`** and **`smiles`**, calls an OpenAI-compatible LLM and writes polished text to **`enriched_description`**. Use this workflow to build a **TMC-Prop3D-Enriched** dataset (enriched descriptions in LMDB) for Stage 2 training.
 - **`generate_QA_pairs.py`** — loads knowledge-source files (e.g. PDF, TXT, Markdown), splits into chunks, and uses the Chat Completions API to generate **Q&A pairs** saved for Stage 2 training.
 
 ---
 
 ## 1. 3D encoder
 
-Downstream **Stage 1 / 2 / Property / NiComplex / Vaska** code expects **pretrained 3D encoder weights** and a **`dict.txt`** atom vocabulary consistent with your OMol / tmQM pipeline.
+Downstream **Stage 1 / 2 / Property / NiComplex / Vaska** code expects **pretrained 3D encoder weights** and a **`dict.txt`** atom vocabulary.
 
 ### Option A — use our pretrained encoder
 
-Load the encoder from **[Reecy/3DTMC-LLM/3D_encoder_pretrain](https://huggingface.co/Reecy/3DTMC-LLM/tree/main/3D_encoder_pretrain)** and use atom vocabulary **[3D_encoder_dict.txt](https://huggingface.co/Reecy/3DTMC-LLM/blob/main/3D_encoder_dict.txt)** (as `dict.txt`). Pass paths via the **Stage 1 geometry-encoder argument** (see `Stage1.py --help`). For Stage 3–style scripts, ensure the **encoder state file** inside `init_ckpt` matches the release (see also **Models and Datasets** and `train_defaults.py` for typical paths). An older mirror may exist at **[Reecy/TMC](https://huggingface.co/Reecy/TMC)**.
+Load the encoder from **[Reecy/3DTMC-LLM/3D_encoder_pretrain](https://huggingface.co/Reecy/3DTMC-LLM/tree/main/3D_encoder_pretrain)** and use atom vocabulary **[3D_encoder_dict.txt](https://huggingface.co/Reecy/3DTMC-LLM/blob/main/3D_encoder_dict.txt)** (as `dict.txt`).
 
 ### Option B — pretrain the 3D encoder yourself
 
@@ -69,11 +69,6 @@ Load the encoder from **[Reecy/3DTMC-LLM/3D_encoder_pretrain](https://huggingfac
      --max-steps ... --save-steps ... --eval-steps ...
    ```
 
-   A reference DeepSpeed fragment for bf16/ZeRO is in **`ds_config_3D_Encoder.json`** in this folder; merge or align it with your full **`deepspeed_config.json`** (batch sizes, optimizer, etc.). The script logs to **Weights & Biases** by default (`--no-wandb` to disable).
-
-4. **Output**  
-   Saved checkpoints are standard **HuggingFace `Trainer` checkpoints** containing the **encoder** weights. Point **Stage 1** at that checkpoint directory (or exported weights) as in `train_defaults.py`. For later stages, place the **encoder state** and **BOS projection** tensors in the layout expected by your `init_ckpt` (see any released checkpoint on **[Reecy/TMC](https://huggingface.co/Reecy/TMC)** as a template).
-
 ---
 
 ## 2. Stage 1 — BOS projection, frozen LLM
@@ -91,8 +86,6 @@ Load the encoder from **[Reecy/3DTMC-LLM/3D_encoder_pretrain](https://huggingfac
   ```
 
   Use the same **`dict.txt`** and **encoder checkpoint** paths as in `train_defaults.py` / your HF download.
-
-- Requires **`ds_config.json`** in this directory (or symlink) for DeepSpeed, consistent with your cluster. A template may live at the parent repo root (`../ds_config.json`).
 
 Defaults are centralized in **`train_defaults.py`** (`STAGE1_DEFAULTS`).
 
