@@ -74,7 +74,7 @@ Load the encoder from **[Reecy/3DTMC-LLM/3D_encoder_pretrain](https://huggingfac
 
 **Script:** `Stage1.py`  
 
-- Trains the **3D encoder + single-token BOS projection** into the LLM embedding space; **LLM is frozen**.  
+- Trains the **3D encoder + single-token projection** into the LLM embedding space; **LLM is frozen**.  
 - **Data:** tmQM-style **LMDB** with `atoms`, `coordinates`, `smiles`, `description`.  
 - **Run (example):**
 
@@ -94,7 +94,7 @@ Defaults are centralized in **`train_defaults.py`** (`STAGE1_DEFAULTS`).
 
 **Script:** `Stage2.py`  
 
-- Continues from a **Stage 1 checkpoint**: **LoRA** on the LLM, **3D encoder + BOS projection** trainable.  
+- Continues from a **Stage 1 checkpoint**: **LoRA** on the LLM, **3D encoder + single-token projection** trainable.  
 - **Mixed data:** (1) **LMDB** with `enriched_description`; (2) **JSON Q&A**.  
 
 **Run (example):**
@@ -165,11 +165,11 @@ CUDA_VISIBLE_DEVICES=0 python inference_demo.py \
 | File | Role |
 |------|------|
 | `3D_Encoder_Trainer.py` | 3D encoder LMDB pretraining with `Trainer` + DeepSpeed |
-| Geometry + Qwen stack (imported everywhere) | Defines BOS-projected 3D tokens + LLM (Stage 1 / 2 / 3 recipes) |
-| `utils.py` | LMDB helpers, 3D batching, BOS embed fusion, collators |
+| Geometry + Qwen stack (imported everywhere) | Defines single-token-projected 3D tokens + LLM (Stage 1 / 2 / 3 recipes) |
+| `utils.py` | LMDB helpers, 3D batching, single-token embed fusion, collators |
 | `Stage1.py` / `Stage2.py` | Instruction-tuning stages |
 | `Property.py` / `NiComplex.py` / `Vaska_Complex.py` | Downstream SFT |
-| `inference_demo.py` | Generic BOS + 3D generation demo |
+| `inference_demo.py` | Generic single-token + 3D generation demo |
 | `train_defaults.py` | Default paths and hyperparameters |
 | `enrich_description.py` | LMDB → LLM polish → `enriched_description` (TMC-Prop3D-Enriched build) |
 | `generate_QA_pairs.py` | Knowledge sources → chunked Q&A JSON |
