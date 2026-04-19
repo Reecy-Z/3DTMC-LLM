@@ -49,14 +49,13 @@ Load the encoder from **[Reecy/3DTMC-LLM/3D_encoder_pretrain](https://huggingfac
 ### Option B — pretrain the 3D encoder yourself
 
 1. **Data**  
-   Use the **OMol25-scale molecular data from Meta on Hugging Face**, e.g. **[`facebook/OMol25`](https://huggingface.co/datasets/facebook/OMol25)** (and related OMol resources), to build a large corpus of **3D structures**.  
-   Convert the release into **LMDB shards** where each record is at least a **`dict` with `atoms` and `coordinates`** (and optional metadata). Atom entries should be mappable to your **`dict.txt`** (element symbols or atomic numbers; see `3D_Encoder_Trainer.py` for integer→symbol handling via RDKit).
+   Use the **OMol25 from Meta**, e.g. **[`facebook/OMol25`](https://huggingface.co/datasets/facebook/OMol25)** or other TMC datasets, to build a large corpus of **TMC 3D structures**.  
 
 2. **Vocabulary**  
-   Obtain or build **`dict.txt`** in the same **line-per-token** format as standard **OMol25_MC** atom vocabularies (one token per line; special symbols such as `[MASK]` are added in code).
+   Obtain or build **`dict.txt`**.
 
 3. **Training**  
-   Run **`3D_Encoder_Trainer.py`** with HuggingFace `Trainer` + **DeepSpeed**, using the **masked-atom, coordinate, and pairwise-distance** pretraining objective:
+   Run **`3D_Encoder_Trainer.py`**, using the **masked-atom, coordinate, and pairwise-distance** pretraining objective:
 
    ```bash
    # Example: adjust paths to your LMDB train/valid, dict.txt, and DeepSpeed JSON.
