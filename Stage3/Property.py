@@ -1,14 +1,15 @@
 """
-Uni-Mol global representation (BOS / [CLS]) is projected by BosProjection to Qwen3 hidden size and
+3D encoder global representation (single-token / [CLS]) is projected by the single-token projection layer to Qwen3 hidden size and
 concatenated with text at the object_ref slot.
 
-Generative training only (CE). Can resume from checkpoints containing unimol.pt, bos_projection.pt, and LoRA.
+Generative training only (CE). Can resume from checkpoints containing 3D_encoder.pt, single_token_projection.pt, and LoRA.
 
 Examples:
   CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Property.py
-  CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Property.py --init_ckpt /path/to/checkpoint-xxx
+  CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Property.py --Stage2_ckpt /path/to/checkpoint-xxx
 """
 import os
+import sys
 import json
 import pickle
 import lmdb
@@ -16,16 +17,22 @@ import numpy as np
 import wandb
 from transformers import AutoTokenizer, TrainingArguments
 from torch.utils.data import Dataset
-import utils  # noqa: F401 -- Uni-Mol sys.path
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+import utils  # noqa: F401 -- 3D encoder (unimol) sys.path
 from utils import (
-    BridgeUnimolCollator,
-    BridgeUnimolFullTrainer,
+    MultimodalCollator,
+    MultimodalFullTrainer,
     _atoms_coords_remove_h_center,
     _lmdb_env_kwargs,
     format_instruction_field,
     tokenize_generation_sample_object_ref,
 )
-from bos_unimol_qwen_model import BosUnimolQwenModel, RECIPE_STAGE3
+from multimodal_LLM import RECIPE_STAGE3, MultimodalModel
 from train_defaults import PROPERTY_DEFAULTS
 
 # Property task definitions
@@ -51,7 +58,7 @@ PROPERTY_CONFIG = {
 }
 
 
-class TmQMgBridgeUnimolDataset(Dataset):
+class TmQMgSingleTokenUnimolDataset(Dataset):
     def __init__(
         self,
         lmdb_paths,
@@ -157,28 +164,31 @@ class TmQMgBridgeUnimolDataset(Dataset):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Property: Uni-Mol BOS + Qwen3 generative SFT")
+    parser = argparse.ArgumentParser(description="Property: 3D encoder single-token + Qwen3 generative SFT")
     parser.add_argument(
         "--model_name",
         type=str,
         default=PROPERTY_DEFAULTS["model_name"],
     )
     parser.add_argument(
-        "--unimol_ckpt",
+        "--3D_encoder_dict",
+        dest="three_d_encoder_dict",
         type=str,
-        default=PROPERTY_DEFAULTS["unimol_ckpt"],
-        help="Uni-Mol pretrained weights (used when init_ckpt is not set)",
+        default=PROPERTY_DEFAULTS["3D_encoder_dict"],
     )
     parser.add_argument(
-        "--unimol_dict",
+        "--Stage2_ckpt",
+        dest="stage2_ckpt",
         type=str,
-        default=PROPERTY_DEFAULTS["unimol_dict"],
+        default=PROPERTY_DEFAULTS["Stage2_ckpt"],
+        help="HF-style checkpoint dir: adapter, 3D_encoder.pt, single_token_projection.pt (optional)",
     )
     parser.add_argument(
-        "--init_ckpt",
+        "--3D_encoder_ckpt",
+        dest="three_d_encoder_ckpt",
         type=str,
-        default=PROPERTY_DEFAULTS["init_ckpt"],
-        help="HF-style checkpoint dir: adapter, unimol.pt, bos_projection.pt (optional)",
+        default=PROPERTY_DEFAULTS["3D_encoder_ckpt"],
+        help="Optional override for 3D encoder ckpt. If set, it takes priority over Stage2_ckpt/3D_encoder.pt.",
     )
     parser.add_argument(
         "--train_lmdb",
@@ -194,7 +204,7 @@ if __name__ == "__main__":
         "--output_dir",
         type=str,
         default=PROPERTY_DEFAULTS["output_dir"],
-        help="Training output dir; default /data/jingyuan_data/sft_<property>_unimol_full_ckpt",
+        help="Training output dir; default /data/jingyuan_data/Stage3_Property_<property>_multimodal_ckpt",
     )
     parser.add_argument("--property", type=str, default=PROPERTY_DEFAULTS["property"],
                         choices=["dipole_moment", "polarisability", "homo_lumo_gap"],
@@ -204,6 +214,13 @@ if __name__ == "__main__":
     parser.add_argument("--lora_alpha", type=int, default=PROPERTY_DEFAULTS["lora_alpha"], help="LoRA alpha (default 32)")
     parser.add_argument("--lora_target", type=str, default=PROPERTY_DEFAULTS["lora_target"], choices=["qv", "qkv", "all"],
                         help="LoRA target modules: qv=[q,v]_proj, qkv=[q,k,v]_proj, all=[q,k,v,o,gate,up,down]_proj")
+    parser.add_argument(
+        "--projection_init",
+        type=str,
+        default=PROPERTY_DEFAULTS["projection_init"],
+        choices=["pretrained", "from_scratch"],
+        help="Initialize projection from Stage2 ckpt or from scratch.",
+    )
     # Training hyperparameters
     parser.add_argument("--epochs", type=int, default=PROPERTY_DEFAULTS["epochs"], help="Number of epochs (default 3)")
     parser.add_argument("--lr", type=float, default=PROPERTY_DEFAULTS["lr"], help="Learning rate (default 5e-5)")
@@ -225,32 +242,33 @@ if __name__ == "__main__":
     instruction_use = prop_cfg.get("instruction_description") or prop_cfg["instruction_smiles"]
 
     if local_rank == 0:
-        wandb.init(project=f"sft_{prop_cfg['output_dir_suffix']}_unimol_full")
-        print(f"[Property] property={args_main.property}, generation (BOS projection + CE)")
+        wandb.init(project=f"Stage3_Property_{prop_cfg['output_dir_suffix']}")
+        print(f"[Property] property={args_main.property}, generation (single-token projection + CE)")
 
     tokenizer = AutoTokenizer.from_pretrained(args_main.model_name)
 
-    model = BosUnimolQwenModel(
+    model = MultimodalModel(
         args_main.model_name,
-        args_main.unimol_dict,
+        args_main.three_d_encoder_dict,
         recipe=RECIPE_STAGE3,
-        unimol_ckpt=args_main.unimol_ckpt,
-        init_ckpt=args_main.init_ckpt,
-        train_unimol=True,
+        three_d_encoder_ckpt=args_main.three_d_encoder_ckpt,
+        init_ckpt=args_main.stage2_ckpt,
+        load_pretrained_projection=(args_main.projection_init == "pretrained"),
+        train_3d_encoder=True,
         train_projection=True,
         train_lora=True,
         lora_r=args_main.lora_r,
         lora_alpha=args_main.lora_alpha,
         lora_target=args_main.lora_target,
     )
-    train_dataset = TmQMgBridgeUnimolDataset(
+    train_dataset = TmQMgSingleTokenUnimolDataset(
         [args_main.train_lmdb],
         tokenizer=tokenizer,
         max_samples=None,
         property_key=prop_key,
         instruction=instruction_use,
     )
-    val_dataset = TmQMgBridgeUnimolDataset(
+    val_dataset = TmQMgSingleTokenUnimolDataset(
         [args_main.val_lmdb],
         tokenizer=tokenizer,
         max_samples=None,
@@ -260,10 +278,10 @@ if __name__ == "__main__":
     if local_rank == 0:
         print(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
 
-    data_collator = BridgeUnimolCollator(tokenizer)
-    ds_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ds_config.json")
+    data_collator = MultimodalCollator(tokenizer)
+    ds_config = os.path.join(_PROJECT_ROOT, "ds_config.json")
     label_names = ["labels"]
-    output_dir = args_main.output_dir or f"/data/jingyuan_data/sft_{prop_cfg['output_dir_suffix']}_unimol_full_ckpt"
+    output_dir = args_main.output_dir or f"/data/jingyuan_data/Stage3_Property_{prop_cfg['output_dir_suffix']}_ckpt"
     training_args = TrainingArguments(
         output_dir=output_dir,
         num_train_epochs=args_main.epochs,
@@ -292,5 +310,5 @@ if __name__ == "__main__":
         metric_for_best_model="eval_loss",
         greater_is_better=False,
     )
-    trainer = BridgeUnimolFullTrainer(model=model, args=training_args, train_dataset=train_dataset, eval_dataset=val_dataset, data_collator=data_collator)
+    trainer = MultimodalFullTrainer(model=model, args=training_args, train_dataset=train_dataset, eval_dataset=val_dataset, data_collator=data_collator)
     trainer.train()

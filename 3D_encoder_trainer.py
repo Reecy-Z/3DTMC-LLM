@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Uni-Mol pretraining with HuggingFace Transformers Trainer and DeepSpeed.
+3D encoder pretraining with HuggingFace Transformers Trainer and DeepSpeed.
 """
 
 from __future__ import annotations
@@ -25,17 +25,17 @@ from tqdm import tqdm
 from transformers import Trainer, TrainingArguments, TrainerCallback
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 import wandb
+from train_defaults import UNICORE_ROOT
 
 # Project paths on sys.path
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_UNIMOL_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, ".."))
-_PROJECT_ROOT = os.path.dirname(_UNIMOL_ROOT)
-for p in [_PROJECT_ROOT, os.path.join(_PROJECT_ROOT, "Uni-Core")]:
+for p in [_SCRIPT_DIR, UNICORE_ROOT]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
-if _UNIMOL_ROOT not in sys.path:
-    sys.path.insert(0, _UNIMOL_ROOT)
+_3D_ENCODER_DIR = os.path.join(_SCRIPT_DIR, "3D_encoder")
+if os.path.isdir(_3D_ENCODER_DIR) and _3D_ENCODER_DIR not in sys.path:
+    sys.path.insert(0, _3D_ENCODER_DIR)
 
 # Pretraining loss normalization (aligned with OMol25_MC_all)
 DIST_MEAN = 6.590849597363901
@@ -104,7 +104,7 @@ def preprocess_molecule(
 
 
 class LMDBPretrainDataset(Dataset):
-    """LMDB dataset for Uni-Mol pretraining."""
+    """LMDB dataset for 3D encoder pretraining."""
 
     def __init__(
         self,
@@ -226,7 +226,7 @@ class UniMolDataCollator:
         dictionary: Any,
         mask_idx: int,
         pad_idx: int = 0,
-        bos_idx: int = 1,
+        single_token_idx: int = 1,
         eos_idx: int = 2,
         mask_prob: float = 0.15,
         noise_type: str = "uniform",
@@ -236,7 +236,7 @@ class UniMolDataCollator:
         self.dictionary = dictionary
         self.mask_idx = mask_idx
         self.pad_idx = pad_idx
-        self.bos_idx = bos_idx
+        self.single_token_idx = single_token_idx
         self.eos_idx = eos_idx
         self.mask_prob = mask_prob
         self.noise_type = noise_type
@@ -254,7 +254,7 @@ class UniMolDataCollator:
         list_coordinates = [f["coordinates"] for f in features]
 
         # Max sequence length in this batch
-        batch_seq_lens = [1 + len(atoms) + 1 for atoms in list_atoms]  # BOS + atoms + EOS
+        batch_seq_lens = [1 + len(atoms) + 1 for atoms in list_atoms]  # single-token + atoms + EOS
         L = max(batch_seq_lens)
 
         num_types = len(self.dictionary)
@@ -277,7 +277,7 @@ class UniMolDataCollator:
 
             # 1. Tokenize atoms
             token_ids = [self.dictionary.index(a) for a in atoms]
-            seq = [self.bos_idx] + token_ids + [self.eos_idx]
+            seq = [self.single_token_idx] + token_ids + [self.eos_idx]
             pad_len = max(0, L - len(seq))
             src_tokens = torch.tensor([seq], dtype=torch.long)
             src_tokens = torch.nn.functional.pad(src_tokens, (0, pad_len), value=self.pad_idx)
@@ -286,7 +286,7 @@ class UniMolDataCollator:
             tokens_target = torch.full_like(src_tokens, self.pad_idx)
             num_mask = max(1, int(self.mask_prob * n_atoms) + (1 if rng.random() < 0.5 else 0))
             mask_positions = rng.choice(n_atoms, min(num_mask, n_atoms), replace=False)
-            mask_indices = mask_positions + 1  # +1 for BOS at index 0
+            mask_indices = mask_positions + 1  # +1 for single-token at index 0
 
             for idx in mask_indices:
                 tokens_target[0, idx] = src_tokens[0, idx].item()
@@ -294,10 +294,10 @@ class UniMolDataCollator:
 
             # 3. Coordinates
             coords = np.asarray(coordinates, dtype=np.float32)
-            coord_bos = np.zeros((1, 3), dtype=np.float32)
+            coord_lead = np.zeros((1, 3), dtype=np.float32)
             coord_eos = np.zeros((1, 3), dtype=np.float32)
             coord_pad = np.zeros((pad_len, 3), dtype=np.float32)
-            full_coord = np.vstack([coord_bos, coords, coord_eos, coord_pad])
+            full_coord = np.vstack([coord_lead, coords, coord_eos, coord_pad])
             src_coord = torch.from_numpy(full_coord).unsqueeze(0)
             coord_target = src_coord.clone()
 
@@ -355,7 +355,7 @@ class UniMolDataCollator:
 
 
 class UniMolTrainer(Trainer):
-    """Trainer with Uni-Mol forward signature and combined pretraining loss."""
+    """Trainer with 3D encoder forward signature and combined pretraining loss."""
 
     def __init__(self, model_args, dist_mean, dist_std, step_offset=0, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -380,7 +380,7 @@ class UniMolTrainer(Trainer):
 
     def create_optimizer(self):
         """
-        Build AdamW with betas/eps matching the original Uni-Mol pretrain recipe.
+        Build AdamW with betas/eps matching the original 3D encoder pretrain recipe.
         DeepSpeed calls this when no optimizer is defined in the DS config.
         """
         if self.optimizer is None:
@@ -404,7 +404,7 @@ class UniMolTrainer(Trainer):
         return self.optimizer
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-        """Uni-Mol masked token / coord / distance (+ optional norm) losses."""
+        """3D encoder masked token / coord / distance (+ optional norm) losses."""
         # Unpack inputs
         src_tokens = inputs["src_tokens"]
         src_distance = inputs["src_distance"]
@@ -425,7 +425,7 @@ class UniMolTrainer(Trainer):
             encoder_masked_tokens=masked_tokens,
         )
         
-        # Uni-Mol returns a tuple
+        # 3D encoder returns a tuple
         if isinstance(outputs, tuple) and len(outputs) >= 5:
             logits_encoder, encoder_distance, encoder_coord, x_norm, delta_encoder_pair_rep_norm = outputs
         else:
@@ -553,12 +553,12 @@ def main(args):
     dictionary = Dictionary.load(dict_path)
     mask_idx = dictionary.add_symbol("[MASK]", is_special=True)
     pad_idx = dictionary.pad()
-    bos_idx = dictionary.bos()
+    single_token_idx = dictionary.bos()
     eos_idx = dictionary.eos()
 
-    print(f"Dictionary: {len(dictionary)} types, pad={pad_idx}, bos={bos_idx}, eos={eos_idx}, mask={mask_idx}")
+    print(f"Dictionary: {len(dictionary)} types, pad={pad_idx}, single_token_idx={single_token_idx}, eos={eos_idx}, mask={mask_idx}")
 
-    # Model hyperparameters (Namespace for UniMolModel)
+    # Model hyperparameters (Namespace for 3D encoder model)
     from argparse import Namespace
 
     model_args = Namespace(
@@ -624,7 +624,7 @@ def main(args):
         dictionary=dictionary,
         mask_idx=mask_idx,
         pad_idx=pad_idx,
-        bos_idx=bos_idx,
+        single_token_idx=single_token_idx,
         eos_idx=eos_idx,
         mask_prob=model_args.mask_prob,
         noise_type=model_args.noise_type,
@@ -901,12 +901,12 @@ def main(args):
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="Uni-Mol pretraining (Transformers Trainer + DeepSpeed)")
-    parser.add_argument("--dict", type=str, default="/data/Jingyuan_data/OMol25_MC_all/dict.txt", help="Path to dict.txt")
-    parser.add_argument("--train-path", type=str, default="/data/Jingyuan_data/OMol25_MC_all/train", help="Train LMDB file or directory")
-    parser.add_argument("--valid-path", type=str, default="/data/Jingyuan_data/OMol25_MC_all/valid.lmdb", help="Validation LMDB path")
-    parser.add_argument("--test-path", type=str, default="/data/Jingyuan_data/OMol25_MC_all/test.lmdb", help="Test LMDB path")
-    parser.add_argument("--output-dir", type=str, default="/data/Jingyuan_data/Uni-Mol", help="Output directory")
+    parser = argparse.ArgumentParser(description="3D encoder pretraining (Transformers Trainer + DeepSpeed)")
+    parser.add_argument("--3D_encoder_dict", type=str, help="Path to 3D encoder dictionary file")
+    parser.add_argument("--train-path", type=str, help="Train LMDB file or directory")
+    parser.add_argument("--valid-path", type=str, help="Validation LMDB path")
+    parser.add_argument("--test-path", type=str, help="Test LMDB path")
+    parser.add_argument("--output-dir", type=str, help="Output directory")
     parser.add_argument("--max-steps", type=int, default=500000, help="Max training steps")
     parser.add_argument("--save-steps", type=int, default=10000, help="Checkpoint every N steps")
     parser.add_argument("--eval-steps", type=int, default=10000, help="Evaluate every N steps")
@@ -917,14 +917,18 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42, help="Global RNG seed")
     parser.add_argument("--max-atoms", type=int, default=256, help="Max atoms after removing hydrogens")
     parser.add_argument("--sample-size", type=int, default=None, help="Cap train/valid/test size for quick tests")
-    parser.add_argument("--deepspeed", type=str, default='/home/zhujingyuan/simple-uni-mol/deepspeed_config.json', help="DeepSpeed JSON config path")
+    parser.add_argument(
+        "--deepspeed",
+        type=str,
+        default=os.path.join(_SCRIPT_DIR, "3D_encoder", "ds_config_3D_encoder.json"),
+        help="DeepSpeed JSON config path",
+    )
     parser.add_argument("--wandb-project", type=str, default="unimol-pretrain", help="wandb project name")
     parser.add_argument("--wandb-name", type=str, default=None, help="wandb run name")
     parser.add_argument("--no-wandb", action="store_true", help="Disable wandb logging")
     parser.add_argument("--num-workers", type=int, default=8, help="DataLoader num_workers")
     parser.add_argument("--log-interval", type=int, default=100, help="Log every N steps")
-    parser.add_argument("--resume-from-checkpoint", type=str, default="/data/Jingyuan_data/Uni-Mol/checkpoint-500000",
-                        help="Resume from this checkpoint; use None or empty string to train from scratch.")
+    parser.add_argument("--resume-from-checkpoint", type=str, help="Resume from this checkpoint; use None or empty string to train from scratch.")
     parser.add_argument("--resume-lr", type=float, default=1e-5,
                         help="LR when resuming (default 1e-5, lower than initial 1e-4 to reduce oscillation)")
     parser.add_argument("--resume-warmup-steps", type=int, default=2000,

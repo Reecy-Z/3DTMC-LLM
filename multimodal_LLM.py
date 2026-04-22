@@ -1,12 +1,12 @@
 """
-Unified Uni-Mol BOS + Qwen3 (4-bit) stack for Stage1 / Stage2 / downstream full SFT.
+Unified 3D encoder single-token + Qwen3 (4-bit) stack for Stage1 / Stage2 / downstream full SFT.
 
 Recipes (string values):
-  - stage1_frozen_llm: frozen LLM; train Uni-Mol + BosProjection only.
-  - stage2_full_sft: full SFT (LoRA + Uni-Mol + BosProjection), init from Stage1 ``adapter_path``;
+  - stage1_frozen_llm: frozen LLM; train 3D encoder + single-token projection only.
+  - stage2_full_sft: full SFT (LoRA + 3D encoder + single-token projection), init from Stage1 ``adapter_path``;
     forward supports mixed batches of LMDB (3D slot) and plain text (same data pipeline as Stage2.py).
-  - stage3_full_sft: same full SFT stack; loads via ``init_ckpt`` / ``unimol_ckpt`` as used by Property / NiComplex / Vaska;
-    forward is BOS 3D path only (no mixed batch).
+  - stage3_full_sft: same full SFT stack; loads via ``init_ckpt`` / ``3D_encoder_ckpt`` as used by Property / NiComplex / Vaska;
+    forward is single-token 3D path only (no mixed batch).
 
 Stage2 and Stage3 are both full-SFT recipes; they differ in initialization and Stage2's mixed batching.
 """
@@ -27,12 +27,16 @@ from utils import (
     ATOM_DIM,
     MAX_SEQ_LENGTH,
     UNIMOL_MAX_SEQ_LEN,
-    UNIMOL_ORIGIN,
-    BosProjectionLayer,
+    OBJECT_REF_CHAT_SEP,
+    THREE_D_ENCODER_STATE_PT,
+    SINGLE_TOKEN_PROJECTION_PT,
+    SINGLE_TOKEN_PROJECTION_SAFETENSORS,
+    SingleTokenProjectionLayer,
     build_batch_multi,
-    build_embeds_bos_only,
+    build_embeds_single_token,
     build_embeds_text_only,
-    extract_bos_repr,
+    extract_single_token_repr,
+    strip_single_token_projection_state_dict,
 )
 
 RECIPE_STAGE1 = "stage1_frozen_llm"
@@ -70,20 +74,21 @@ def _unimol_args(dictionary) -> Namespace:
     )
 
 
-def _resolve_dict_path(unimol_dict_path: Optional[str]) -> str:
-    dict_path = unimol_dict_path or os.path.join(UNIMOL_ORIGIN, "unimol", "example_data", "molecule", "dict.txt")
-    if not os.path.isfile(dict_path):
-        dict_path = "/data/jingyuan_data/OMol25_MC/dict.txt"
-    return dict_path
+def _resolve_dict_path(three_d_encoder_dict_path: Optional[str]) -> str:
+    if not three_d_encoder_dict_path:
+        raise ValueError("three_d_encoder_dict is required and cannot be empty.")
+    if not os.path.isfile(three_d_encoder_dict_path):
+        raise FileNotFoundError(f"3D encoder dictionary not found: {three_d_encoder_dict_path}")
+    return three_d_encoder_dict_path
 
 
-def _load_unimol_state(unimol_checkpoint: str):
-    if os.path.isdir(unimol_checkpoint):
-        sf_path = os.path.join(unimol_checkpoint, "model.safetensors")
+def _load_3d_encoder_state(three_d_encoder_ckpt: str):
+    if os.path.isdir(three_d_encoder_ckpt):
+        sf_path = os.path.join(three_d_encoder_ckpt, "model.safetensors")
         if os.path.isfile(sf_path):
             return load_file(sf_path)
-        raise FileNotFoundError(f"No model.safetensors found under {unimol_checkpoint}")
-    state = torch.load(unimol_checkpoint, map_location="cpu", weights_only=False)
+        raise FileNotFoundError(f"No model.safetensors found under {three_d_encoder_ckpt}")
+    state = torch.load(three_d_encoder_ckpt, map_location="cpu", weights_only=False)
     if "model" in state:
         state = state["model"]
     return state
@@ -93,60 +98,50 @@ def _strip_module_prefix(state):
     return {k.replace("module.", "", 1) if k.startswith("module.") else k: v for k, v in state.items()}
 
 
-class BosUnimolQwenModel(nn.Module):
-    """Single implementation for BOS-slot 3D + Qwen; select behavior via ``recipe``."""
+class MultimodalModel(nn.Module):
+    """Single implementation for single-token-slot 3D + Qwen; select behavior via ``recipe``."""
 
     def __init__(
         self,
         model_name: str,
-        unimol_dict_path: str,
+        three_d_encoder_dict_path: str,
         *,
         recipe: str,
-        unimol_checkpoint: Optional[str] = None,
         adapter_path: Optional[str] = None,
-        unimol_ckpt: Optional[str] = None,
+        three_d_encoder_ckpt: Optional[str] = None,
         init_ckpt: Optional[str] = None,
-        dipole_mean: Optional[float] = None,
-        dipole_std: Optional[float] = None,
-        train_unimol: Optional[bool] = None,
+        train_3d_encoder: Optional[bool] = None,
         train_projection: Optional[bool] = None,
         train_lora: bool = True,
+        load_pretrained_projection: bool = True,
         lora_r: int = 8,
         lora_alpha: int = 32,
         lora_target: str = "qv",
-        use_bridge: bool = False,
-        regression_mode: bool = False,
-        include_bos: bool = True,
-        bos_only: bool = True,
+        include_single_token: bool = True,
+        single_token_only: bool = True,
     ):
         super().__init__()
         if recipe not in (RECIPE_STAGE1, RECIPE_STAGE2, RECIPE_STAGE3):
             raise ValueError(f"Unknown recipe={recipe!r}")
 
         if recipe == RECIPE_STAGE3:
-            if not bos_only or use_bridge or regression_mode:
+            if not single_token_only:
                 raise NotImplementedError(
-                    "bos_unimol_qwen_model only implements the BOS-only generative path; "
-                    "for bridge / regression use SFT_dipole_bridge_unimol_full.py."
+                    "3DTMC-LLM only implements the single-token-only generative path."
                 )
         self.recipe = recipe
-        self.bos_only = True
-        self.use_bridge = False
-        self.include_bos = True
-        self.regression_mode = False
-        self.bridge_layer = None
+        self.single_token_only = True
+        self.include_single_token = True
         self.projection_layer = None
-        self.regression_head = None
 
         self._lora_r = lora_r
         self._lora_alpha = lora_alpha
         self._lora_target_modules = _LORA_TARGET_MAP.get(lora_target, ["q_proj", "v_proj"])
         self.supports_mixed_batch = recipe == RECIPE_STAGE2
-        self.dipole_mean = dipole_mean
-        self.dipole_std = dipole_std
-        self._train_unimol = train_unimol
+        self._train_3d_encoder = train_3d_encoder
         self._train_projection = train_projection
         self._train_lora = train_lora
+        self._load_pretrained_projection = load_pretrained_projection
 
         in_distributed = os.environ.get("LOCAL_RANK") is not None
         device_map = None if in_distributed else "auto"
@@ -154,11 +149,11 @@ class BosUnimolQwenModel(nn.Module):
 
         from unicore.data import Dictionary
 
-        dict_path = _resolve_dict_path(unimol_dict_path)
+        dict_path = _resolve_dict_path(three_d_encoder_dict_path)
         self.dictionary = Dictionary.load(dict_path)
         self.dictionary.add_symbol("[MASK]", is_special=True)
         self._pad_idx = self.dictionary.pad()
-        self._bos_idx = self.dictionary.bos()
+        self._single_token_idx = self.dictionary.bos()
         self._eos_idx = self.dictionary.eos()
 
         from unimol import UniMolModel
@@ -173,12 +168,12 @@ class BosUnimolQwenModel(nn.Module):
         )
 
         if recipe == RECIPE_STAGE1:
-            if not unimol_checkpoint:
-                raise ValueError("stage1_frozen_llm requires unimol_checkpoint")
-            state_to_load = _strip_module_prefix(_load_unimol_state(unimol_checkpoint))
+            if not three_d_encoder_ckpt:
+                raise ValueError("stage1_frozen_llm requires three_d_encoder_ckpt")
+            state_to_load = _strip_module_prefix(_load_3d_encoder_state(three_d_encoder_ckpt))
             self.unimol.load_state_dict(state_to_load, strict=False)
             if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                print(f"[BosUnimolQwen] stage1: Loaded Uni-Mol from {unimol_checkpoint}")
+                print(f"[3DTMC-LLM] stage1: Loaded 3D encoder from {three_d_encoder_ckpt}")
             for p in self.unimol.parameters():
                 p.requires_grad = True
 
@@ -192,19 +187,22 @@ class BosUnimolQwenModel(nn.Module):
             for p in self.llm.parameters():
                 p.requires_grad = False
             if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                print("[BosUnimolQwen] stage1: LLM frozen")
+                print("[3DTMC-LLM] stage1: LLM frozen")
 
         elif recipe == RECIPE_STAGE2:
             if not adapter_path:
-                raise ValueError("stage2_full_sft requires adapter_path (Stage1 BOS-only output directory)")
-            unimol_pt = os.path.join(adapter_path, "unimol.pt")
-            if os.path.isfile(unimol_pt):
-                state = torch.load(unimol_pt, map_location="cpu", weights_only=False)
-                if "model" in state:
-                    state = state["model"]
-                self.unimol.load_state_dict(state, strict=False)
-                if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                    print(f"[BosUnimolQwen] stage2: Loaded Uni-Mol from {unimol_pt}")
+                raise ValueError("stage2_full_sft requires adapter_path (Stage1 single-token-only output directory)")
+            three_d_encoder_pt = os.path.join(adapter_path, THREE_D_ENCODER_STATE_PT)
+            if not os.path.isfile(three_d_encoder_pt):
+                raise FileNotFoundError(
+                    f"stage2_full_sft requires {THREE_D_ENCODER_STATE_PT} under adapter_path, missing: {three_d_encoder_pt}"
+                )
+            state = torch.load(three_d_encoder_pt, map_location="cpu", weights_only=False)
+            if "model" in state:
+                state = state["model"]
+            self.unimol.load_state_dict(state, strict=False)
+            if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+                print(f"[3DTMC-LLM] stage2: Loaded 3D encoder from {three_d_encoder_pt}")
             for p in self.unimol.parameters():
                 p.requires_grad = True
 
@@ -221,7 +219,7 @@ class BosUnimolQwenModel(nn.Module):
             if os.path.isfile(lora_adapter_path):
                 self.llm = PeftModel.from_pretrained(llm, adapter_path)
                 if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                    print(f"[BosUnimolQwen] stage2: LoRA from {adapter_path}")
+                    print(f"[3DTMC-LLM] stage2: LoRA from {adapter_path}")
             else:
                 lora_config = LoraConfig(
                     task_type=TaskType.CAUSAL_LM,
@@ -234,7 +232,7 @@ class BosUnimolQwenModel(nn.Module):
                 self.llm = get_peft_model(llm, lora_config)
                 if int(os.environ.get("LOCAL_RANK", 0)) == 0:
                     print(
-                        f"[BosUnimolQwen] stage2: new LoRA r={self._lora_r}, alpha={self._lora_alpha}, "
+                        f"[3DTMC-LLM] stage2: new LoRA r={self._lora_r}, alpha={self._lora_alpha}, "
                         f"targets={self._lora_target_modules}"
                     )
             self.llm.print_trainable_parameters()
@@ -255,37 +253,29 @@ class BosUnimolQwenModel(nn.Module):
                 dummy = torch.tensor([[self.tokenizer.eos_token_id]], device=device)
                 emb = llm.get_input_embeddings()(dummy)
             hidden_size = emb.shape[-1]
-            self.bos_projection_layer = BosProjectionLayer(hidden_size).to(device=device, dtype=emb.dtype)
+            self.single_token_projection_layer = SingleTokenProjectionLayer(hidden_size).to(device=device, dtype=emb.dtype)
             if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                print("[BosUnimolQwen] stage3_full_sft: BOS -> BosProjection -> LLM")
+                print("[3DTMC-LLM] stage3: single-token -> single-token projection -> LLM")
 
             if init_ckpt and os.path.isdir(init_ckpt):
-                unimol_pt = os.path.join(init_ckpt, "unimol.pt")
-                unimol_loaded_from = None
-                if os.path.isfile(unimol_pt):
-                    state = torch.load(unimol_pt, map_location="cpu", weights_only=False)
-                    if "model" in state:
-                        state = state["model"]
-                    self.unimol.load_state_dict(state, strict=False)
-                    unimol_loaded_from = unimol_pt
+                if three_d_encoder_ckpt:
+                    three_d_encoder_load_path = three_d_encoder_ckpt
                 else:
-                    default_unimol_ckpt = "/home/zhujingyuan/Uni-Mol/save/checkpoint_best.pt"
-                    if os.path.isfile(default_unimol_ckpt):
-                        state = torch.load(default_unimol_ckpt, map_location="cpu", weights_only=False)
-                        if "model" in state:
-                            state = state["model"]
-                        self.unimol.load_state_dict(_strip_module_prefix(state), strict=False)
-                        unimol_loaded_from = default_unimol_ckpt
-                    elif int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                        print(f"[BosUnimolQwen] Warning: {unimol_pt} and default Uni-Mol missing; random init")
-                if unimol_loaded_from and int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                    print(f"[BosUnimolQwen] Loaded Uni-Mol from {unimol_loaded_from}")
+                    three_d_encoder_load_path = os.path.join(init_ckpt, THREE_D_ENCODER_STATE_PT)
+                if not (os.path.isfile(three_d_encoder_load_path) or os.path.isdir(three_d_encoder_load_path)):
+                    raise FileNotFoundError(
+                        f"3D encoder checkpoint missing or invalid: {three_d_encoder_load_path}"
+                    )
+                state = _strip_module_prefix(_load_3d_encoder_state(three_d_encoder_load_path))
+                self.unimol.load_state_dict(state, strict=False)
+                if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+                    print(f"[3DTMC-LLM] Loaded 3D encoder from {three_d_encoder_load_path}")
 
                 adapter_config = os.path.join(init_ckpt, "adapter_config.json")
                 if os.path.isfile(adapter_config):
                     self.llm = PeftModel.from_pretrained(llm, init_ckpt, is_trainable=True)
                     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                        print(f"[BosUnimolQwen] Loaded LoRA from {init_ckpt}")
+                        print(f"[3DTMC-LLM] Loaded LoRA from {init_ckpt}")
                 else:
                     lora_config = LoraConfig(
                         task_type=TaskType.CAUSAL_LM,
@@ -297,31 +287,35 @@ class BosUnimolQwenModel(nn.Module):
                     )
                     self.llm = get_peft_model(llm, lora_config)
                     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                        print(f"[BosUnimolQwen] Created new LoRA (r={self._lora_r})")
+                        print(f"[3DTMC-LLM] Created new LoRA (r={self._lora_r})")
             else:
-                loaded_unimol = False
-                if unimol_ckpt:
-                    if os.path.isdir(unimol_ckpt):
-                        safetensor_path = os.path.join(unimol_ckpt, "model.safetensors")
+                loaded_three_d_encoder = False
+                if three_d_encoder_ckpt:
+                    if os.path.isdir(three_d_encoder_ckpt):
+                        safetensor_path = os.path.join(three_d_encoder_ckpt, "model.safetensors")
                         if os.path.isfile(safetensor_path):
                             state = load_file(safetensor_path, device="cpu")
                             self.unimol.load_state_dict(_strip_module_prefix(state), strict=False)
-                            loaded_unimol = True
+                            loaded_three_d_encoder = True
                             if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                                print(f"[BosUnimolQwen] Loaded Uni-Mol from {safetensor_path}")
-                    elif os.path.isfile(unimol_ckpt):
-                        if unimol_ckpt.endswith(".safetensors"):
-                            state = load_file(unimol_ckpt, device="cpu")
+                                print(f"[3DTMC-LLM] Loaded 3D encoder from {safetensor_path}")
+                    elif os.path.isfile(three_d_encoder_ckpt):
+                        if three_d_encoder_ckpt.endswith(".safetensors"):
+                            state = load_file(three_d_encoder_ckpt, device="cpu")
                         else:
-                            state = torch.load(unimol_ckpt, map_location="cpu", weights_only=False)
+                            state = torch.load(three_d_encoder_ckpt, map_location="cpu", weights_only=False)
                             if "model" in state:
                                 state = state["model"]
                         self.unimol.load_state_dict(_strip_module_prefix(state), strict=False)
-                        loaded_unimol = True
+                        loaded_three_d_encoder = True
                         if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                            print(f"[BosUnimolQwen] Loaded Uni-Mol from {unimol_ckpt}")
-                if not loaded_unimol and int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                    print("[BosUnimolQwen] Uni-Mol: no valid checkpoint; random init")
+                            print(f"[3DTMC-LLM] Loaded 3D encoder from {three_d_encoder_ckpt}")
+                if not loaded_three_d_encoder:
+                    raise FileNotFoundError(
+                        "3D encoder checkpoint not found or invalid. "
+                        "Please provide a valid --3D_encoder_ckpt (file/dir) or ensure "
+                        "Stage2_ckpt contains 3D_encoder.pt."
+                    )
 
                 lora_config = LoraConfig(
                     task_type=TaskType.CAUSAL_LM,
@@ -333,61 +327,69 @@ class BosUnimolQwenModel(nn.Module):
                 )
                 self.llm = get_peft_model(llm, lora_config)
                 if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                    print(f"[BosUnimolQwen] Created new LoRA (r={self._lora_r})")
+                    print(f"[3DTMC-LLM] Created new LoRA (r={self._lora_r})")
 
             self.llm.print_trainable_parameters()
 
             if init_ckpt and os.path.isdir(init_ckpt):
-                unimol_pt_in_ckpt = os.path.join(init_ckpt, "unimol.pt")
-                default_unimol_ckpt = "/home/zhujingyuan/Uni-Mol/save/checkpoint_best.pt"
-                if os.path.isfile(unimol_pt_in_ckpt):
-                    unimol_source = unimol_pt_in_ckpt
-                elif os.path.isfile(default_unimol_ckpt):
-                    unimol_source = default_unimol_ckpt
+                three_d_encoder_pt_in_ckpt = (
+                    three_d_encoder_ckpt
+                    if (three_d_encoder_ckpt and (os.path.isfile(three_d_encoder_ckpt) or os.path.isdir(three_d_encoder_ckpt)))
+                    else os.path.join(init_ckpt, THREE_D_ENCODER_STATE_PT)
+                )
+                if os.path.isfile(three_d_encoder_pt_in_ckpt) or os.path.isdir(three_d_encoder_pt_in_ckpt):
+                    three_d_encoder_source = three_d_encoder_pt_in_ckpt
                 else:
-                    unimol_source = "random_init"
+                    three_d_encoder_source = "random_init"
                 lora_source = init_ckpt if os.path.isfile(os.path.join(init_ckpt, "adapter_config.json")) else "new"
             else:
-                unimol_source = unimol_ckpt if unimol_ckpt else "random_init"
+                three_d_encoder_source = three_d_encoder_ckpt if three_d_encoder_ckpt else "random_init"
                 lora_source = "new"
 
-            if self._train_unimol is None:
-                self._train_unimol = not (init_ckpt and os.path.isdir(init_ckpt))
+            if self._train_3d_encoder is None:
+                self._train_3d_encoder = not (init_ckpt and os.path.isdir(init_ckpt))
             if self._train_projection is None:
                 self._train_projection = not (init_ckpt and os.path.isdir(init_ckpt))
 
             for p in self.unimol.parameters():
-                p.requires_grad = self._train_unimol
+                p.requires_grad = self._train_3d_encoder
             if not self._train_lora:
                 for n, p in self.llm.named_parameters():
                     if "lora" in n.lower():
                         p.requires_grad = False
 
-            bos_proj_source = "new"
-            if init_ckpt and os.path.isdir(init_ckpt):
-                bos_safetensors = os.path.join(init_ckpt, "bos_projection.safetensors")
-                bos_pt = os.path.join(init_ckpt, "bos_projection.pt")
-                if os.path.isfile(bos_safetensors):
-                    bos_state = load_file(bos_safetensors, device="cpu")
-                    self.bos_projection_layer.load_state_dict(bos_state, strict=False)
-                    bos_proj_source = bos_safetensors
-                    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                        print(f"[BosUnimolQwen] Loaded BOS projection from {bos_safetensors}")
-                elif os.path.isfile(bos_pt):
-                    bos_state = torch.load(bos_pt, map_location="cpu", weights_only=False)
-                    self.bos_projection_layer.load_state_dict(bos_state, strict=False)
-                    bos_proj_source = bos_pt
-                    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                        print(f"[BosUnimolQwen] Loaded BOS projection from {bos_pt}")
-                elif int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                    print("[BosUnimolQwen] BosProjection trained from scratch")
+            projection_source = "new"
+            if self._load_pretrained_projection and init_ckpt and os.path.isdir(init_ckpt):
+                st_path = os.path.join(init_ckpt, SINGLE_TOKEN_PROJECTION_SAFETENSORS)
+                pt_path = os.path.join(init_ckpt, SINGLE_TOKEN_PROJECTION_PT)
 
-            train_bos = self._train_projection if self._train_projection is not None else True
-            for p in self.bos_projection_layer.parameters():
-                p.requires_grad = train_bos
+                if os.path.isfile(st_path):
+                    raw = load_file(st_path, device="cpu")
+                    sd = strip_single_token_projection_state_dict(dict(raw))
+                    if sd:
+                        self.single_token_projection_layer.load_state_dict(sd, strict=False)
+                    projection_source = st_path
+                    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+                        print(f"[3DTMC-LLM] Loaded single-token projection from {st_path}")
+                elif os.path.isfile(pt_path):
+                    raw = torch.load(pt_path, map_location="cpu", weights_only=False)
+                    sd = strip_single_token_projection_state_dict(raw if isinstance(raw, dict) else {})
+                    if sd:
+                        self.single_token_projection_layer.load_state_dict(sd, strict=False)
+                    projection_source = pt_path
+                    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+                        print(f"[3DTMC-LLM] Loaded single-token projection from {pt_path}")
+                elif int(os.environ.get("LOCAL_RANK", 0)) == 0:
+                    print("[3DTMC-LLM] single-token projection trained from scratch")
+            elif int(os.environ.get("LOCAL_RANK", 0)) == 0:
+                print("[3DTMC-LLM] single-token projection forced from-scratch init")
+
+            train_projection = self._train_projection if self._train_projection is not None else True
+            for p in self.single_token_projection_layer.parameters():
+                p.requires_grad = train_projection
 
             if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                self._print_module_config_table(unimol_source, lora_source, bos_proj_source)
+                self._print_module_config_table(three_d_encoder_source, lora_source, projection_source)
 
         if recipe != RECIPE_STAGE3:
             device = next(self.llm.parameters()).device
@@ -395,41 +397,43 @@ class BosUnimolQwenModel(nn.Module):
                 dummy = torch.tensor([[self.tokenizer.eos_token_id]], device=device)
                 emb = self.llm.get_input_embeddings()(dummy)
             hidden_size = emb.shape[-1]
-            self.bos_projection_layer = BosProjectionLayer(hidden_size).to(device=device, dtype=emb.dtype)
+            self.single_token_projection_layer = SingleTokenProjectionLayer(hidden_size).to(device=device, dtype=emb.dtype)
             if recipe == RECIPE_STAGE2:
-                bos_proj_path = os.path.join(adapter_path, "bos_projection.safetensors")
-                if os.path.isfile(bos_proj_path):
-                    st = load_file(bos_proj_path)
-                    bos_state = {k.replace("bos_projection.", ""): v for k, v in st.items() if k.startswith("bos_projection.")}
-                    if bos_state:
-                        self.bos_projection_layer.load_state_dict(bos_state, strict=False)
+                st_path = os.path.join(adapter_path, SINGLE_TOKEN_PROJECTION_SAFETENSORS)
+                if os.path.isfile(st_path):
+                    raw = load_file(st_path)
+                    sd = strip_single_token_projection_state_dict(dict(raw))
+                    if sd:
+                        self.single_token_projection_layer.load_state_dict(sd, strict=False)
                     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                        print(f"[BosUnimolQwen] Loaded BosProjection from {bos_proj_path}")
+                        print(f"[3DTMC-LLM] Loaded single-token projection from {st_path}")
                 else:
-                    bos_pt = os.path.join(adapter_path, "bos_projection.pt")
-                    if os.path.isfile(bos_pt):
-                        st = torch.load(bos_pt, map_location="cpu", weights_only=False)
-                        self.bos_projection_layer.load_state_dict(st, strict=False)
+                    pt_path = os.path.join(adapter_path, SINGLE_TOKEN_PROJECTION_PT)
+                    if os.path.isfile(pt_path):
+                        raw = torch.load(pt_path, map_location="cpu", weights_only=False)
+                        sd = strip_single_token_projection_state_dict(raw if isinstance(raw, dict) else {})
+                        if sd:
+                            self.single_token_projection_layer.load_state_dict(sd, strict=False)
                         if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                            print(f"[BosUnimolQwen] Loaded BosProjection from {bos_pt}")
-                for p in self.bos_projection_layer.parameters():
+                            print(f"[3DTMC-LLM] Loaded single-token projection from {pt_path}")
+                for p in self.single_token_projection_layer.parameters():
                     p.requires_grad = True
             else:
                 if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                    print(f"[BosUnimolQwen] stage1: BosProjection({ATOM_DIM}->{hidden_size})")
+                    print(f"[3DTMC-LLM] stage1: single-token projection ({ATOM_DIM}->{hidden_size})")
 
         self._start_3d_id = self.tokenizer.convert_tokens_to_ids("<|object_ref_start|>")
         self._end_3d_id = self.tokenizer.convert_tokens_to_ids("<|object_ref_end|>")
         self.unimol = self.unimol.to(next(self.llm.parameters()).device)
 
-    def _print_module_config_table(self, unimol_source, lora_source, bos_proj_source="new"):
+    def _print_module_config_table(self, three_d_encoder_source, lora_source, projection_source="new"):
         def count_params(module):
             if module is None:
                 return 0
             return sum(p.numel() for p in module.parameters())
 
         unimol_params = count_params(self.unimol)
-        bos_proj_params = count_params(self.bos_projection_layer)
+        projection_params = count_params(self.single_token_projection_layer)
         lora_params = sum(p.numel() for n, p in self.llm.named_parameters() if "lora" in n.lower())
 
         def fmt_params(n):
@@ -443,21 +447,21 @@ class BosUnimolQwenModel(nn.Module):
                 return f"{n/1e3:.2f}K"
             return str(n)
 
-        train_bos = self._train_projection if self._train_projection is not None else True
+        train_projection = self._train_projection if self._train_projection is not None else True
         print("\n" + "=" * 90)
-        print("                         Module config (BOS-only)")
+        print("                         Module config (single-token-only)")
         print("=" * 90)
         print(f"{'Module':<20} {'Train':<12} {'#Params':<15} {'Source'}")
         print("-" * 90)
-        print(f"{'Uni-Mol':<20} {'train' if self._train_unimol else 'frozen':<12} {fmt_params(unimol_params):<15} {unimol_source}")
-        print(f"{'BosProjection':<20} {'train' if train_bos else 'frozen':<12} {fmt_params(bos_proj_params):<15} {bos_proj_source}")
+        print(f"{'3D encoder':<20} {'train' if self._train_3d_encoder else 'frozen':<12} {fmt_params(unimol_params):<15} {three_d_encoder_source}")
+        print(f"{'single-token proj.':<20} {'train' if train_projection else 'frozen':<12} {fmt_params(projection_params):<15} {projection_source}")
         print(f"{'LoRA':<20} {'train' if self._train_lora else 'frozen':<12} {fmt_params(lora_params):<15} {lora_source}")
         print("-" * 90)
         total_trainable = 0
-        if self._train_unimol:
+        if self._train_3d_encoder:
             total_trainable += unimol_params
-        if train_bos:
-            total_trainable += bos_proj_params
+        if train_projection:
+            total_trainable += projection_params
         if self._train_lora:
             total_trainable += lora_params
         print(f"{'Total trainable':<20} {fmt_params(total_trainable)}")
@@ -481,7 +485,7 @@ class BosUnimolQwenModel(nn.Module):
             self.dictionary,
             max_seq_len=UNIMOL_MAX_SEQ_LEN,
             pad_idx=self._pad_idx,
-            bos_idx=self._bos_idx,
+            single_token_idx=self._single_token_idx,
             eos_idx=self._eos_idx,
             device=str(device),
         )
@@ -491,8 +495,8 @@ class BosUnimolQwenModel(nn.Module):
             batch_dict["src_coord"],
             batch_dict["src_edge_type"],
         )
-        bos_repr = extract_bos_repr(encoder_rep)
-        return build_embeds_bos_only(
+        single_token_repr = extract_single_token_repr(encoder_rep)
+        return build_embeds_single_token(
             self.llm,
             device,
             before_3d_ids,
@@ -501,20 +505,20 @@ class BosUnimolQwenModel(nn.Module):
             after_3d_mask,
             response_ids,
             response_mask,
-            bos_repr,
-            self.bos_projection_layer,
+            single_token_repr,
+            self.single_token_projection_layer,
             self._start_3d_id,
             self._end_3d_id,
         )
 
-    def _get_unimol_bos(self, list_atoms, list_coordinates, device):
+    def _get_3d_encoder_single_token(self, list_atoms, list_coordinates, device):
         batch_dict = build_batch_multi(
             list_atoms,
             list_coordinates,
             self.dictionary,
             max_seq_len=UNIMOL_MAX_SEQ_LEN,
             pad_idx=self._pad_idx,
-            bos_idx=self._bos_idx,
+            single_token_idx=self._single_token_idx,
             eos_idx=self._eos_idx,
             device=str(device),
         )
@@ -524,7 +528,7 @@ class BosUnimolQwenModel(nn.Module):
             batch_dict["src_coord"],
             batch_dict["src_edge_type"],
         )
-        return extract_bos_repr(encoder_rep)
+        return extract_single_token_repr(encoder_rep)
 
     def forward(
         self,
@@ -542,8 +546,8 @@ class BosUnimolQwenModel(nn.Module):
         device = next(self.llm.parameters()).device
 
         if self.recipe == RECIPE_STAGE3:
-            bos_repr = self._get_unimol_bos(list_atoms, list_coordinates, device)
-            inputs_embeds, attention_mask, labels = build_embeds_bos_only(
+            single_token_repr = self._get_3d_encoder_single_token(list_atoms, list_coordinates, device)
+            inputs_embeds, attention_mask, labels = build_embeds_single_token(
                 self.llm,
                 device,
                 before_3d_ids,
@@ -552,8 +556,8 @@ class BosUnimolQwenModel(nn.Module):
                 after_3d_mask,
                 response_ids,
                 response_mask,
-                bos_repr,
-                self.bos_projection_layer,
+                single_token_repr,
+                self.single_token_projection_layer,
                 self._start_3d_id,
                 self._end_3d_id,
             )
@@ -566,7 +570,7 @@ class BosUnimolQwenModel(nn.Module):
                 self.dictionary,
                 max_seq_len=UNIMOL_MAX_SEQ_LEN,
                 pad_idx=self._pad_idx,
-                bos_idx=self._bos_idx,
+                single_token_idx=self._single_token_idx,
                 eos_idx=self._eos_idx,
                 device=str(device),
             )
@@ -576,8 +580,8 @@ class BosUnimolQwenModel(nn.Module):
                 batch_dict["src_coord"],
                 batch_dict["src_edge_type"],
             )
-            bos_repr = extract_bos_repr(encoder_rep)
-            inputs_embeds, attention_mask, labels = build_embeds_bos_only(
+            single_token_repr = extract_single_token_repr(encoder_rep)
+            inputs_embeds, attention_mask, labels = build_embeds_single_token(
                 self.llm,
                 device,
                 before_3d_ids,
@@ -586,8 +590,8 @@ class BosUnimolQwenModel(nn.Module):
                 after_3d_mask,
                 response_ids,
                 response_mask,
-                bos_repr,
-                self.bos_projection_layer,
+                single_token_repr,
+                self.single_token_projection_layer,
                 self._start_3d_id,
                 self._end_3d_id,
             )
@@ -676,9 +680,110 @@ class BosUnimolQwenModel(nn.Module):
         return self.llm(inputs_embeds=inputs_embeds, attention_mask=attention_mask, labels=labels)
 
 
+def generate_with_single_token_structure(
+    model: MultimodalModel,
+    tokenizer,
+    atoms,
+    coords,
+    user_content: str,
+    *,
+    max_new_tokens: int = 512,
+    do_sample: bool = False,
+    temperature: float = 0.7,
+    top_p: float = 0.9,
+) -> str:
+    device = next(model.llm.parameters()).device
+    embed_layer = model.llm.get_input_embeddings()
+
+    batch_dict = build_batch_multi(
+        [atoms],
+        [coords],
+        model.dictionary,
+        max_seq_len=UNIMOL_MAX_SEQ_LEN,
+        pad_idx=model._pad_idx,
+        single_token_idx=model._single_token_idx,
+        eos_idx=model._eos_idx,
+        device=str(device),
+    )
+    model.unimol.eval()
+    with torch.inference_mode():
+        encoder_rep, _ = model.unimol(
+            batch_dict["src_tokens"],
+            batch_dict["src_distance"],
+            batch_dict["src_coord"],
+            batch_dict["src_edge_type"],
+        )
+    single_token_repr = extract_single_token_repr(encoder_rep)
+    proj_dtype = next(model.single_token_projection_layer.parameters()).dtype
+    single_token_repr = single_token_repr.to(dtype=proj_dtype)
+    with torch.inference_mode():
+        mol_embeds = model.single_token_projection_layer(single_token_repr).unsqueeze(1)
+
+    prefix_str = tokenizer.apply_chat_template(
+        [{"role": "user", "content": user_content}],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    sep = OBJECT_REF_CHAT_SEP
+    if sep not in prefix_str:
+        before_3d_str = prefix_str
+        after_3d_str = ""
+    else:
+        before_3d_str, rest = prefix_str.split(sep, 1)
+        after_3d_str = sep + rest
+
+    with torch.inference_mode():
+        before_3d_ids = tokenizer(before_3d_str, return_tensors="pt").input_ids.to(device)
+        after_3d_ids = tokenizer(after_3d_str, return_tensors="pt").input_ids.to(device) if after_3d_str else None
+        before_3d_embeds = embed_layer(before_3d_ids)
+        if after_3d_ids is not None and after_3d_ids.shape[1] > 0:
+            after_3d_embeds = embed_layer(after_3d_ids)
+        else:
+            after_3d_embeds = torch.empty(
+                1, 0, before_3d_embeds.shape[2], device=device, dtype=before_3d_embeds.dtype
+            )
+        start_ids = torch.tensor([[model._start_3d_id]], device=device)
+        end_ids = torch.tensor([[model._end_3d_id]], device=device)
+        start_emb = embed_layer(start_ids)
+        end_emb = embed_layer(end_ids)
+
+    model_dtype = before_3d_embeds.dtype
+    start_emb = start_emb.to(model_dtype)
+    end_emb = end_emb.to(model_dtype)
+    mol_embeds = mol_embeds.to(model_dtype)
+    three_d_block = torch.cat([start_emb, mol_embeds, end_emb], dim=1)
+    fused_embeddings = torch.cat([before_3d_embeds, three_d_block, after_3d_embeds], dim=1)
+    fused_attention_mask = torch.ones((1, fused_embeddings.shape[1]), dtype=torch.long, device=device)
+
+    eos_id = tokenizer.eos_token_id
+    prompt_len = int(fused_attention_mask[0].sum().item())
+    model.llm.eval()
+
+    gen_kwargs = dict(
+        inputs_embeds=fused_embeddings,
+        attention_mask=fused_attention_mask,
+        max_new_tokens=max_new_tokens,
+        use_cache=True,
+        eos_token_id=eos_id,
+        pad_token_id=eos_id,
+    )
+    if do_sample:
+        gen_kwargs["do_sample"] = True
+        gen_kwargs["temperature"] = max(temperature, 1e-5)
+        gen_kwargs["top_p"] = top_p
+    else:
+        gen_kwargs["do_sample"] = False
+
+    with torch.inference_mode():
+        out_ids = model.llm.generate(**gen_kwargs)
+    gen_ids = out_ids[0, prompt_len:]
+    return tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
+
+
 __all__ = [
-    "BosUnimolQwenModel",
+    "MultimodalModel",
     "RECIPE_STAGE1",
     "RECIPE_STAGE2",
     "RECIPE_STAGE3",
+    "generate_with_single_token_structure",
 ]

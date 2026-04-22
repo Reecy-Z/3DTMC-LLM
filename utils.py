@@ -1,8 +1,8 @@
 """
-Shared utilities for Uni-Mol BOS + Qwen chat templates with an object_ref (3D) slot.
+Shared utilities for 3D encoder single-token + Qwen chat templates with an object_ref (3D) slot.
 
 Used by Property / Stage1 / NiComplex / Vaska / Stage2: LMDB IO, geometry prep,
-Uni-Mol batching, BosProjection embed fusion, and chat tokenization around``<|im_end|>`` (object_ref boundary).
+3D encoder batching, single-token projection embed fusion, and chat tokenization around``<|im_end|>`` (object_ref boundary).
 """
 from __future__ import annotations
 
@@ -19,9 +19,9 @@ import torch.nn as nn
 from scipy.spatial import distance_matrix
 from transformers import Trainer
 from tqdm import tqdm
+from train_defaults import UNICORE_ROOT
 
 TMC_LLM_ROOT = os.path.dirname(os.path.abspath(__file__))
-UNIMOL_ORIGIN = "/home/zhujingyuan/Uni-Mol"
 
 MAX_SEQ_LENGTH = 512
 ATOM_DIM = 512
@@ -32,17 +32,19 @@ OBJECT_REF_CHAT_SEP = "<|im_end|>"
 
 
 def ensure_unimol_import_paths() -> None:
-    """Prepend local Uni-Core / Uni-Mol paths so ``import unimol`` works."""
+    """Prepend local Uni-Core / 3D encoder paths so ``import unimol`` works."""
     for p in [
         TMC_LLM_ROOT,
         os.path.join(TMC_LLM_ROOT, "Uni-Core"),
-        UNIMOL_ORIGIN,
-        os.path.join(UNIMOL_ORIGIN, "Uni-Core"),
+        UNICORE_ROOT,
     ]:
         if p not in sys.path and os.path.isdir(p):
             sys.path.insert(0, p)
     if TMC_LLM_ROOT not in sys.path:
         sys.path.insert(0, TMC_LLM_ROOT)
+    enc_dir = os.path.join(TMC_LLM_ROOT, "3D_encoder")
+    if os.path.isdir(enc_dir) and enc_dir not in sys.path:
+        sys.path.insert(0, enc_dir)
 
 
 def _lmdb_env_kwargs():
@@ -105,7 +107,7 @@ def build_batch_multi(
     dictionary,
     max_seq_len=512,
     pad_idx=0,
-    bos_idx=1,
+    single_token_idx=1,
     eos_idx=2,
     device="cpu",
 ):
@@ -115,15 +117,15 @@ def build_batch_multi(
     list_src_tokens, list_src_coord, list_src_distance, list_src_edge_type = [], [], [], []
     for atoms, coordinates in zip(list_atoms, list_coordinates):
         token_ids = [dictionary.index(a) if a in dictionary.indices else dictionary.unk() for a in atoms]
-        seq = [bos_idx] + token_ids + [eos_idx]
+        seq = [single_token_idx] + token_ids + [eos_idx]
         pad_len = max(0, L - len(seq))
         src_tokens = torch.tensor([seq], dtype=torch.long)
         src_tokens = nn.functional.pad(src_tokens, (0, pad_len), value=pad_idx)
         coords = np.asarray(coordinates, dtype=np.float32)
-        coord_bos = np.zeros((1, 3), dtype=np.float32)
+        coord_lead = np.zeros((1, 3), dtype=np.float32)
         coord_eos = np.zeros((1, 3), dtype=np.float32)
         coord_pad = np.zeros((pad_len, 3), dtype=np.float32)
-        full_coord = np.vstack([coord_bos, coords, coord_eos, coord_pad])
+        full_coord = np.vstack([coord_lead, coords, coord_eos, coord_pad])
         src_coord = torch.from_numpy(full_coord).unsqueeze(0)
         dist = distance_matrix(full_coord, full_coord).astype(np.float32)
         src_distance = torch.from_numpy(dist).unsqueeze(0)
@@ -142,11 +144,31 @@ def build_batch_multi(
     }
 
 
-def extract_bos_repr(encoder_rep):
+def extract_single_token_repr(encoder_rep):
+    """First sequence position of the encoder output (single-token / lead slot)."""
     return encoder_rep[:, 0, :]
 
 
-class BosProjectionLayer(nn.Module):
+def strip_single_token_projection_state_dict(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Map saved keys ``single_token_projection.*`` to module state keys (unprefixed)."""
+    if not state:
+        return state
+    out: Dict[str, Any] = {}
+    for k, v in state.items():
+        if k.startswith("single_token_projection."):
+            out[k[len("single_token_projection.") :]] = v
+        else:
+            out[k] = v
+    return out
+
+
+SINGLE_TOKEN_PROJECTION_SAFETENSORS = "single_token_projection.safetensors"
+SINGLE_TOKEN_PROJECTION_PT = "single_token_projection.pt"
+# HF-style multimodal checkpoint: 3D encoder weights next to LoRA / projection.
+THREE_D_ENCODER_STATE_PT = "3D_encoder.pt"
+
+
+class SingleTokenProjectionLayer(nn.Module):
     def __init__(self, hidden_size):
         super().__init__()
         self.projection = nn.Linear(ATOM_DIM, hidden_size)
@@ -225,8 +247,8 @@ def _pad_ids(id_lists, pad_id, dtype=torch.long):
     return padded, mask
 
 
-class BridgeUnimolCollator:
-    """Pads chat prefix slices + response + structure fields for BOS-slot models."""
+class MultimodalCollator:
+    """Pads chat prefix slices + response + structure fields for single-token-slot models."""
 
     def __init__(self, tokenizer):
         self.pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
@@ -291,7 +313,7 @@ def build_embeds_text_only(llm, device, before_3d_ids, before_3d_mask, response_
     return _pad_stack_embeds(emb_list, mask_list, label_list, device=device, dtype_emb=before_3d_embeds.dtype)
 
 
-def build_embeds_bos_only(
+def build_embeds_single_token(
     llm,
     device,
     before_3d_ids,
@@ -300,12 +322,12 @@ def build_embeds_bos_only(
     after_3d_mask,
     response_ids,
     response_mask,
-    bos_repr,
-    bos_projection_layer,
+    single_token_repr,
+    single_token_projection_layer,
     start_3d_id,
     end_3d_id,
 ):
-    """Insert a single projected BOS vector between object_ref start/end token embeddings."""
+    """Insert one projected encoder vector at the single-token slot between object_ref start/end token embeddings."""
     embed_fn = llm.get_input_embeddings()
     B = before_3d_ids.shape[0]
     before_3d_ids = before_3d_ids.to(device)
@@ -321,9 +343,9 @@ def build_embeds_bos_only(
     end_emb = embed_fn(torch.tensor([[end_3d_id]], device=device))
     dtype_emb = before_3d_embeds.dtype
 
-    proj_dtype = next(bos_projection_layer.parameters()).dtype
-    bos_repr = bos_repr.to(device=device, dtype=proj_dtype)
-    bos_proj = bos_projection_layer(bos_repr).unsqueeze(1).to(dtype_emb)
+    proj_dtype = next(single_token_projection_layer.parameters()).dtype
+    single_token_repr = single_token_repr.to(device=device, dtype=proj_dtype)
+    single_token_proj = single_token_projection_layer(single_token_repr).unsqueeze(1).to(dtype_emb)
 
     L1, L2, Lr = before_3d_mask.sum(dim=1), after_3d_mask.sum(dim=1), response_mask.sum(dim=1)
     emb_list, mask_list, label_list = [], [], []
@@ -334,11 +356,11 @@ def build_embeds_bos_only(
                 "response effective length is 0 (Lr=0): labels would be prefix -100 only and CE loss is NaN. "
                 "Check Dataset for empty response_ids or padding mask issues."
             )
-        mol_emb = bos_proj[i : i + 1]
+        single_token_emb = single_token_proj[i : i + 1]
         fused = torch.cat([
             before_3d_embeds[i : i + 1, :l1],
             start_emb.expand(1, -1, -1),
-            mol_emb,
+            single_token_emb,
             end_emb.expand(1, -1, -1),
             after_3d_embeds[i : i + 1, :l2],
         ], dim=1)
@@ -362,8 +384,8 @@ def unwrap_hf_model(model):
     return m
 
 
-class BridgeUnimolFullTrainer(Trainer):
-    """Saves LoRA adapter, unimol.pt, bos_projection.pt, and tokenizer (BOS-only pipeline)."""
+class MultimodalFullTrainer(Trainer):
+    """Saves LoRA adapter, 3D_encoder.pt, single-token_projection.pt, and tokenizer (single-token-only pipeline)."""
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         outputs = model(**inputs)
@@ -397,17 +419,16 @@ class BridgeUnimolFullTrainer(Trainer):
         model = unwrap_hf_model(self.model)
         model.llm.save_pretrained(output_dir)
         model.tokenizer.save_pretrained(output_dir)
-        if model.bos_projection_layer is not None:
-            bos_proj_state = {k: v.cpu() for k, v in model.bos_projection_layer.state_dict().items()}
-            torch.save(bos_proj_state, os.path.join(output_dir, "bos_projection.pt"))
-        torch.save({"model": model.unimol.state_dict()}, os.path.join(output_dir, "unimol.pt"))
-        # inference_dipole_bridge_unimol_full.load_model_full reads bos_only / include_bos
-        with open(os.path.join(output_dir, "bridge_config.json"), "w", encoding="utf-8") as f:
+        if model.single_token_projection_layer is not None:
+            single_token_projection_state = {k: v.cpu() for k, v in model.single_token_projection_layer.state_dict().items()}
+            torch.save(single_token_projection_state, os.path.join(output_dir, "single_token_projection.pt"))
+        torch.save({"model": model.unimol.state_dict()}, os.path.join(output_dir, THREE_D_ENCODER_STATE_PT))
+        with open(os.path.join(output_dir, "multimodal_config.json"), "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "atom_dim": ATOM_DIM,
-                    "include_bos": True,
-                    "bos_only": True,
+                    "include_single_token": True,
+                    "single_token_only": True,
                 },
                 f,
                 indent=2,

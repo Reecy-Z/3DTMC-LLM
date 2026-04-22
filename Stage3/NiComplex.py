@@ -1,6 +1,6 @@
 """
 SFT training for ΔΔG prediction on a Ni(III) intermediate dataset (`/data/jingyuan_data/NiComplex`),
-using the same Uni-Mol + BOS / bridge + Qwen3-4B (4bit + LoRA) architecture and training setup
+using the same 3D encoder + single-token + Qwen3-4B (4bit + LoRA) architecture and training setup
 as `SFT_ligandscreen_enantio_unimol_full.py`.
 
 Differences vs LigandScreen script:
@@ -11,6 +11,7 @@ Differences vs LigandScreen script:
 """
 
 import os
+import sys
 import json
 import pickle
 import lmdb
@@ -20,10 +21,15 @@ from torch.utils.data import Dataset
 from transformers import AutoTokenizer, TrainingArguments
 import wandb
 
-from bos_unimol_qwen_model import BosUnimolQwenModel, RECIPE_STAGE3
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from multimodal_LLM import RECIPE_STAGE3, MultimodalModel
 from utils import (
-    BridgeUnimolCollator,
-    BridgeUnimolFullTrainer,
+    MultimodalCollator,
+    MultimodalFullTrainer,
     MAX_SEQ_LENGTH,
     _atoms_coords_remove_h_center,
     format_instruction_field,
@@ -51,7 +57,7 @@ def load_merged_valid_nicomplex_records(lmdb_paths, local_rank=0):
     for p in lmdb_paths:
         if not os.path.exists(p):
             if local_rank == 0:
-                print(f"[NiComplex] skip missing LMDB: {p}")
+                print(f"[Stage3_NiComplex] skip missing LMDB: {p}")
             continue
         all_raw.extend(read_nicomplex_lmdb(p, max_samples=None))
     merged_valid = []
@@ -100,7 +106,7 @@ def read_nicomplex_lmdb(lmdb_path, max_samples=None, show_progress=True):
             break
     env.close()
     if bad > 0 and rank0:
-        print(f"[NiComplex-LMDB] skipped {bad} bad entries")
+        print(f"[Stage3_NiComplex-LMDB] skipped {bad} bad entries")
     return data_list
 
 
@@ -162,10 +168,10 @@ class NiComplexDDGDataset(Dataset):
             src = lmdb_paths if samples is None else "provided samples"
             raise RuntimeError(f"No valid samples: {src}")
         if nan_skipped > 0 and int(os.environ.get("LOCAL_RANK", 0)) == 0:
-            print(f"[NiComplexDataset] Skipped {nan_skipped} samples with NaN {self.property_key}")
+            print(f"[Stage3_NiComplexDataset] Skipped {nan_skipped} samples with NaN {self.property_key}")
         if int(os.environ.get("LOCAL_RANK", 0)) == 0:
             print(
-                f"[NiComplexDataset] property={self.property_key}, {len(self.samples)} samples; "
+                f"[Stage3_NiComplexDataset] property={self.property_key}, {len(self.samples)} samples; "
                 f"mode=GENERATION"
             )
 
@@ -201,23 +207,31 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="SFT_nicomplex_ddg_unimol_full: Ni(III) ΔΔG from 3D structures only"
+        description="Stage3_NiComplex: Ni(III) ΔΔG from 3D structures only"
     )
     parser.add_argument(
         "--model_name",
         type=str,
         default=NICOMPLEX_DEFAULTS["model_name"],
     )
-    parser.add_argument("--unimol_ckpt", type=str, default=NICOMPLEX_DEFAULTS["unimol_ckpt"])
     parser.add_argument(
-        "--unimol_dict",
+        "--3D_encoder_dict",
+        dest="three_d_encoder_dict",
         type=str,
-        default=NICOMPLEX_DEFAULTS["unimol_dict"],
+        default=NICOMPLEX_DEFAULTS["3D_encoder_dict"],
     )
     parser.add_argument(
-        "--init_ckpt",
+        "--Stage2_ckpt",
+        dest="stage2_ckpt",
         type=str,
-        default=NICOMPLEX_DEFAULTS["init_ckpt"],
+        default=NICOMPLEX_DEFAULTS["Stage2_ckpt"],
+    )
+    parser.add_argument(
+        "--3D_encoder_ckpt",
+        dest="three_d_encoder_ckpt",
+        type=str,
+        default=NICOMPLEX_DEFAULTS["3D_encoder_ckpt"],
+        help="Optional override for 3D encoder ckpt. If set, it takes priority over Stage2_ckpt/3D_encoder.pt.",
     )
     parser.add_argument(
         "--output_dir",
@@ -248,6 +262,13 @@ if __name__ == "__main__":
     parser.add_argument("--lora_r", type=int, default=NICOMPLEX_DEFAULTS["lora_r"])
     parser.add_argument("--lora_alpha", type=int, default=NICOMPLEX_DEFAULTS["lora_alpha"])
     parser.add_argument("--lora_target", type=str, default=NICOMPLEX_DEFAULTS["lora_target"], choices=["qv", "qkv", "all"])
+    parser.add_argument(
+        "--projection_init",
+        type=str,
+        default=NICOMPLEX_DEFAULTS["projection_init"],
+        choices=["pretrained", "from_scratch"],
+        help="Initialize projection from Stage2 ckpt or from scratch.",
+    )
     parser.add_argument("--epochs", type=int, default=NICOMPLEX_DEFAULTS["epochs"])
     parser.add_argument("--lr", type=float, default=NICOMPLEX_DEFAULTS["lr"])
     parser.add_argument("--batch_size", type=int, default=NICOMPLEX_DEFAULTS["batch_size"])
@@ -264,7 +285,7 @@ if __name__ == "__main__":
     except RuntimeError:
         pass
 
-    # fixed design: generation-only + BOS-only (single-token) projection (scheme C)
+    # fixed design: generation-only + single-token-only projection
 
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     split_seed = args.split_seed
@@ -274,9 +295,9 @@ if __name__ == "__main__":
 
     n_total = len(merged_valid)
     if n_total == 0:
-        raise RuntimeError(f"[SFT-NiComplex] No valid ddG samples after merging LMDBs: {lmdb_paths}")
+        raise RuntimeError(f"[Stage3_NiComplex] No valid ddG samples after merging LMDBs: {lmdb_paths}")
     if nan_skipped > 0 and local_rank == 0:
-        print(f"[SFT-NiComplex] Skipped {nan_skipped} invalid ddG entries while merging")
+        print(f"[Stage3_NiComplex] Skipped {nan_skipped} invalid ddG entries while merging")
 
     indices = np.arange(n_total)
     rng = np.random.RandomState(split_seed)
@@ -300,27 +321,28 @@ if __name__ == "__main__":
     if local_rank == 0:
         os.makedirs(run_output_dir, exist_ok=True)
         print(
-            f"[SFT-NiComplex] split_seed={split_seed} | total={n_total}, "
+            f"[Stage3_NiComplex] split_seed={split_seed} | total={n_total}, "
             f"train={len(train_samples)}, val={len(val_samples)}, test={len(_test_samples)} | "
             f"output_dir={run_output_dir}"
         )
 
     if local_rank == 0:
         wandb.init(
-            project="sft_nicomplex_ddg_unimol_full",
+            project="Stage3_NiComplex",
             name=f"seed_{split_seed}",
             reinit=True,
             config=vars(args),
         )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
-    model = BosUnimolQwenModel(
+    model = MultimodalModel(
         args.model_name,
-        args.unimol_dict,
+        args.three_d_encoder_dict,
         recipe=RECIPE_STAGE3,
-        unimol_ckpt=args.unimol_ckpt,
-        init_ckpt=args.init_ckpt,
-        train_unimol=True,
+        three_d_encoder_ckpt=args.three_d_encoder_ckpt,
+        init_ckpt=args.stage2_ckpt,
+        load_pretrained_projection=(args.projection_init == "pretrained"),
+        train_3d_encoder=True,
         train_projection=True,
         train_lora=True,
         lora_r=args.lora_r,
@@ -342,7 +364,7 @@ if __name__ == "__main__":
     )
 
     label_names = ["labels"]
-    data_collator = BridgeUnimolCollator(tokenizer, regression_mode=False)
+    data_collator = MultimodalCollator(tokenizer)
     training_args = TrainingArguments(
         output_dir=run_output_dir,
         num_train_epochs=args.epochs,
@@ -372,7 +394,7 @@ if __name__ == "__main__":
         seed=split_seed,
     )
 
-    trainer = BridgeUnimolFullTrainer(
+    trainer = MultimodalFullTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,

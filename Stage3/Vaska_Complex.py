@@ -1,5 +1,5 @@
 """
-Fine-tune Uni-Mol + Qwen3-4B on Vaska's complexes for dihydrogen activation
+Fine-tune 3D encoder + Qwen3-4B on Vaska's complexes for dihydrogen activation
 energy barrier, using 3D structures (atoms + coordinates) and SMILES in the prompt.
 
 Data source:
@@ -13,6 +13,7 @@ LMDB entries are expected to contain:
 """
 
 import os
+import sys
 import json
 import pickle
 import lmdb
@@ -22,10 +23,15 @@ from torch.utils.data import Dataset
 from transformers import AutoTokenizer, TrainingArguments
 import wandb
 
-from bos_unimol_qwen_model import BosUnimolQwenModel, RECIPE_STAGE3
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from multimodal_LLM import RECIPE_STAGE3, MultimodalModel
 from utils import (
-    BridgeUnimolCollator,
-    BridgeUnimolFullTrainer,
+    MultimodalCollator,
+    MultimodalFullTrainer,
     _atoms_coords_remove_h_center,
     format_instruction_field,
     tokenize_generation_sample_object_ref,
@@ -34,7 +40,7 @@ from train_defaults import VASKA_DEFAULTS
 
 VASKA_INSTRUCTION = (
     "What is the dihydrogen activation energy barrier (in kcal/mol) of this Vaska's complex? "
-    "Given the SMILES {smiles} and the 3D structure, respond with the numerical value only:"
+    "Given the SMILES and structure, respond with the numerical value only:"
 )
 
 
@@ -82,8 +88,8 @@ def read_vaska_lmdb(lmdb_path, max_samples=None, show_progress=True):
     return data_list
 
 
-class VaskaBarrierDataset(Dataset):
-    """Vaska barrier: 3D block + SMILES in the chat prompt (instruction uses ``{smiles}``)."""
+class VaskaComplexDataset(Dataset):
+    """Vaska barrier: 3D block + SMILES in the chat prompt."""
 
     def __init__(
         self,
@@ -155,10 +161,7 @@ class VaskaBarrierDataset(Dataset):
         atoms, coords = _atoms_coords_remove_h_center(atoms, coords)
 
         smiles = format_instruction_field(data.get("smiles"))
-        if "{smiles}" in self.instruction:
-            user_content = self.instruction.format(smiles=smiles)
-        else:
-            user_content = f"{self.instruction} {smiles}".strip()
+        user_content = f"{self.instruction} {smiles}".strip()
 
         ids = tokenize_generation_sample_object_ref(self.tokenizer, user_content, response)
         return {**ids, "atoms": atoms, "coordinates": coords}
@@ -168,7 +171,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="SFT_vaska_barrier_unimol_full: Vaska barrier from 3D + SMILES in prompt"
+        description="SFT_vaska_barrier_multimodal: Vaska barrier from 3D + SMILES in prompt"
     )
     parser.add_argument(
         "--model_name",
@@ -176,21 +179,24 @@ if __name__ == "__main__":
         default=VASKA_DEFAULTS["model_name"],
     )
     parser.add_argument(
-        "--unimol_ckpt",
+        "--3D_encoder_dict",
+        dest="three_d_encoder_dict",
         type=str,
-        default=VASKA_DEFAULTS["unimol_ckpt"],
-        help="Uni-Mol checkpoint path (used when init_ckpt is None).",
+        default=VASKA_DEFAULTS["3D_encoder_dict"],
     )
     parser.add_argument(
-        "--unimol_dict",
+        "--Stage2_ckpt",
+        dest="stage2_ckpt",
         type=str,
-        default=VASKA_DEFAULTS["unimol_dict"],
+        default=VASKA_DEFAULTS["Stage2_ckpt"],
+        help="Optional checkpoint containing 3D_encoder.pt + projection + LoRA.",
     )
     parser.add_argument(
-        "--init_ckpt",
+        "--3D_encoder_ckpt",
+        dest="three_d_encoder_ckpt",
         type=str,
-        default=VASKA_DEFAULTS["init_ckpt"],
-        help="Optional checkpoint containing unimol + projection + bridge + LoRA.",
+        default=VASKA_DEFAULTS["3D_encoder_ckpt"],
+        help="Optional override for 3D encoder ckpt. If set, it takes priority over Stage2_ckpt/3D_encoder.pt.",
     )
     parser.add_argument(
         "--lmdb",
@@ -204,7 +210,7 @@ if __name__ == "__main__":
         default=VASKA_DEFAULTS["output_dir"],
         help="Base directory; checkpoints go to <output_dir>/seed_<split_seed>/.",
     )
-    # BOS-only projection only
+    # single-token-only projection only
     # LoRA hyper-parameters
     parser.add_argument(
         "--lora_r",
@@ -224,6 +230,13 @@ if __name__ == "__main__":
         default=VASKA_DEFAULTS["lora_target"],
         choices=["qv", "qkv", "all"],
         help="LoRA target modules.",
+    )
+    parser.add_argument(
+        "--projection_init",
+        type=str,
+        default=VASKA_DEFAULTS["projection_init"],
+        choices=["pretrained", "from_scratch"],
+        help="Initialize projection from Stage2 ckpt or from scratch.",
     )
     # training hyper-parameters
     parser.add_argument(
@@ -250,7 +263,7 @@ if __name__ == "__main__":
         type=int,
         default=VASKA_DEFAULTS["split_seed"],
         help=(
-            "Random seed for 20/40/40 train/val/test shuffle and TrainingArguments.seed. "
+            "Random seed for 80/10/10 train/val/test shuffle and TrainingArguments.seed. "
             "Checkpoint directory: --output_dir/seed_<split_seed>/."
         ),
     )
@@ -269,32 +282,32 @@ if __name__ == "__main__":
     split_seed = args_main.split_seed
 
     if local_rank == 0:
-        print(f"[SFT-Vaska] property=barrier (kcal/mol), MODE: GENERATION, BOS_ONLY (scheme C)")
+        print(f"[Stage3_Vaska_Complex] property=barrier (kcal/mol), MODE: GENERATION, SINGLE_TOKEN_ONLY")
         print(
-            f"[SFT-Vaska] split_seed={split_seed} | checkpoint dir: "
+            f"[Stage3_Vaska_Complex] split_seed={split_seed} | checkpoint dir: "
             f"{os.path.join(args_main.output_dir, f'seed_{split_seed}')}"
         )
 
     tokenizer = AutoTokenizer.from_pretrained(args_main.model_name)
 
-    # Load LMDB once; 20/40/40 train/val/test split uses split_seed for shuffle
+    # Load LMDB once; 80/10/10 train/val/test split uses split_seed for shuffle
     all_raw = read_vaska_lmdb(args_main.lmdb, max_samples=None)
     n_total = len(all_raw)
     if n_total == 0:
-        raise RuntimeError(f"[SFT-Vaska] LMDB {args_main.lmdb} has no samples")
+        raise RuntimeError(f"[Stage3_Vaska_Complex] LMDB {args_main.lmdb} has no samples")
 
-    data_collator = BridgeUnimolCollator(tokenizer, regression_mode=False)
-    ds_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ds_config.json")
+    data_collator = MultimodalCollator(tokenizer)
+    ds_config = os.path.join(_PROJECT_ROOT, "ds_config.json")
     label_names = ["labels"]
 
     if local_rank == 0:
-        print(f"\n[SFT-Vaska] ========== split_seed={split_seed} ==========")
+        print(f"\n[Stage3_Vaska_Complex] ========== split_seed={split_seed} ==========")
 
     indices = np.arange(n_total)
     rng = np.random.RandomState(split_seed)
     rng.shuffle(indices)
-    n_train = int(0.2 * n_total)
-    n_val = int(0.4 * n_total)
+    n_train = int(0.8 * n_total)
+    n_val = int(0.1 * n_total)
     n_test = n_total - n_train - n_val
     train_idx = indices[:n_train]
     val_idx = indices[n_train : n_train + n_val]
@@ -307,13 +320,14 @@ if __name__ == "__main__":
     if local_rank == 0:
         os.makedirs(run_output_dir, exist_ok=True)
 
-    model = BosUnimolQwenModel(
+    model = MultimodalModel(
         args_main.model_name,
-        args_main.unimol_dict,
+        args_main.three_d_encoder_dict,
         recipe=RECIPE_STAGE3,
-        unimol_ckpt=args_main.unimol_ckpt,
-        init_ckpt=args_main.init_ckpt,
-        train_unimol=True,
+        three_d_encoder_ckpt=args_main.three_d_encoder_ckpt,
+        init_ckpt=args_main.stage2_ckpt,
+        load_pretrained_projection=(args_main.projection_init == "pretrained"),
+        train_3d_encoder=True,
         train_projection=True,
         train_lora=True,
         lora_r=args_main.lora_r,
@@ -321,12 +335,12 @@ if __name__ == "__main__":
         lora_target=args_main.lora_target,
     )
 
-    train_dataset = VaskaBarrierDataset(
+    train_dataset = VaskaComplexDataset(
         tokenizer=tokenizer,
         instruction=None,
         samples=train_samples,
     )
-    val_dataset = VaskaBarrierDataset(
+    val_dataset = VaskaComplexDataset(
         tokenizer=tokenizer,
         instruction=None,
         samples=val_samples,
@@ -334,14 +348,14 @@ if __name__ == "__main__":
 
     if local_rank == 0:
         print(
-            f"[SFT-Vaska] seed={split_seed} | total={n_total}, "
+            f"[Stage3_Vaska_Complex] seed={split_seed} | total={n_total}, "
             f"train={len(train_dataset)}, val={len(val_dataset)}, test={len(_test_samples)} | "
             f"output_dir={run_output_dir}"
         )
 
     if local_rank == 0:
         wandb.init(
-            project="sft_vaska_barrier_unimol_full",
+            project="Stage3_Vaska_Complex",
             name=f"seed_{split_seed}",
             reinit=True,
             config=vars(args_main),
@@ -377,7 +391,7 @@ if __name__ == "__main__":
         seed=split_seed,
     )
 
-    trainer = BridgeUnimolFullTrainer(
+    trainer = MultimodalFullTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,

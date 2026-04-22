@@ -1,7 +1,7 @@
 """
-Generic BOS + Uni-Mol chat demo: user provides SMILES, an XYZ path, and any instruction.
+Generic single-token + 3D encoder chat demo: user provides SMILES, an XYZ path, and any instruction.
 
-3D structure is encoded with Uni-Mol and injected at the object_ref slot; the LLM sees your
+3D structure is encoded with the 3D encoder and injected at the object_ref slot; the LLM sees your
 text (instruction + optional SMILES / description) together with that 3D token.
 
 Default instruction is the HOMO–LUMO example from ``Property.PROPERTY_CONFIG`` (line ~48);
@@ -28,15 +28,11 @@ import torch
 
 import utils  # noqa: F401
 
-from Property import PROPERTY_CONFIG
-from bos_unimol_qwen_model import BosUnimolQwenModel, RECIPE_STAGE3
-from train_defaults import PROPERTY_DEFAULTS
+from Stage3.Property import PROPERTY_CONFIG
+from multimodal_LLM import RECIPE_STAGE3, MultimodalModel, generate_with_single_token_structure
+from train_defaults import STAGE2_DEFAULTS
 from transformers import AutoTokenizer
 from utils import (
-    UNIMOL_MAX_SEQ_LEN,
-    OBJECT_REF_CHAT_SEP,
-    build_batch_multi,
-    extract_bos_repr,
     format_instruction_field,
     _atoms_coords_remove_h_center,
 )
@@ -44,8 +40,7 @@ from utils import (
 _DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_XYZ = os.path.join(_DIR, "CC(C)P(->[Au+]<-[I-])(C(C)C)C(C)C.xyz")
 DEFAULT_SMILES = "CC(C)P(->[Au+]<-[I-])(C(C)C)C(C)C"
-# Same text as Property.py ``homo_lumo_gap`` → ``instruction_description`` (example default only).
-DEFAULT_INSTRUCTION = PROPERTY_CONFIG["homo_lumo_gap"]["instruction_description"]
+DEFAULT_INSTRUCTION = "Give a description of this transition metal complex:"
 
 
 def read_xyz(path: str):
@@ -82,116 +77,14 @@ def build_user_content(
     return instruction
 
 
-def generate_with_bos_structure(
-    model: BosUnimolQwenModel,
-    tokenizer,
-    atoms,
-    coords,
-    user_content: str,
-    *,
-    max_new_tokens: int = 512,
-    do_sample: bool = False,
-    temperature: float = 0.7,
-    top_p: float = 0.9,
-) -> str:
-    device = next(model.llm.parameters()).device
-    embed_layer = model.llm.get_input_embeddings()
-
-    batch_dict = build_batch_multi(
-        [atoms],
-        [coords],
-        model.dictionary,
-        max_seq_len=UNIMOL_MAX_SEQ_LEN,
-        pad_idx=model._pad_idx,
-        bos_idx=model._bos_idx,
-        eos_idx=model._eos_idx,
-        device=str(device),
-    )
-    model.unimol.eval()
-    with torch.inference_mode():
-        encoder_rep, _ = model.unimol(
-            batch_dict["src_tokens"],
-            batch_dict["src_distance"],
-            batch_dict["src_coord"],
-            batch_dict["src_edge_type"],
-        )
-    bos_repr = extract_bos_repr(encoder_rep)
-    proj_dtype = next(model.bos_projection_layer.parameters()).dtype
-    bos_repr = bos_repr.to(dtype=proj_dtype)
-    with torch.inference_mode():
-        mol_embeds = model.bos_projection_layer(bos_repr).unsqueeze(1)
-
-    prefix_str = tokenizer.apply_chat_template(
-        [{"role": "user", "content": user_content}],
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-    sep = OBJECT_REF_CHAT_SEP
-    if sep not in prefix_str:
-        before_3d_str = prefix_str
-        after_3d_str = ""
-    else:
-        before_3d_str, rest = prefix_str.split(sep, 1)
-        after_3d_str = sep + rest
-
-    with torch.inference_mode():
-        before_3d_ids = tokenizer(before_3d_str, return_tensors="pt").input_ids.to(device)
-        after_3d_ids = tokenizer(after_3d_str, return_tensors="pt").input_ids.to(device) if after_3d_str else None
-        before_3d_embeds = embed_layer(before_3d_ids)
-        if after_3d_ids is not None and after_3d_ids.shape[1] > 0:
-            after_3d_embeds = embed_layer(after_3d_ids)
-        else:
-            after_3d_embeds = torch.empty(
-                1, 0, before_3d_embeds.shape[2], device=device, dtype=before_3d_embeds.dtype
-            )
-        start_ids = torch.tensor([[model._start_3d_id]], device=device)
-        end_ids = torch.tensor([[model._end_3d_id]], device=device)
-        start_emb = embed_layer(start_ids)
-        end_emb = embed_layer(end_ids)
-
-    model_dtype = before_3d_embeds.dtype
-    start_emb = start_emb.to(model_dtype)
-    end_emb = end_emb.to(model_dtype)
-    mol_embeds = mol_embeds.to(model_dtype)
-    three_d_block = torch.cat([start_emb, mol_embeds, end_emb], dim=1)
-    fused_embeddings = torch.cat([before_3d_embeds, three_d_block, after_3d_embeds], dim=1)
-    fused_attention_mask = torch.ones((1, fused_embeddings.shape[1]), dtype=torch.long, device=device)
-
-    eos_id = tokenizer.eos_token_id
-    prompt_len = int(fused_attention_mask[0].sum().item())
-    model.llm.eval()
-
-    gen_kwargs = dict(
-        inputs_embeds=fused_embeddings,
-        attention_mask=fused_attention_mask,
-        max_new_tokens=max_new_tokens,
-        use_cache=True,
-        eos_token_id=eos_id,
-        pad_token_id=eos_id,
-    )
-    if do_sample:
-        gen_kwargs["do_sample"] = True
-        gen_kwargs["temperature"] = max(temperature, 1e-5)
-        gen_kwargs["top_p"] = top_p
-    else:
-        gen_kwargs["do_sample"] = False
-
-    with torch.inference_mode():
-        out_ids = model.llm.generate(**gen_kwargs)
-    gen_ids = out_ids[0, prompt_len:]
-    return tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
-
-
 def load_model_and_tokenizer(args):
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
-    unimol_ckpt = args.unimol_ckpt or None
-    model = BosUnimolQwenModel(
+    model = MultimodalModel(
         args.model_name,
-        args.unimol_dict,
+        args.three_d_encoder_dict,
         recipe=RECIPE_STAGE3,
-        unimol_ckpt=unimol_ckpt,
-        init_ckpt=args.init_ckpt,
-        train_unimol=False,
+        init_ckpt=args.stage2_ckpt,
+        train_3d_encoder=False,
         train_projection=False,
         train_lora=False,
         lora_r=args.lora_r,
@@ -213,13 +106,17 @@ def prepare_geometry(xyz_path: str):
 
 
 def add_demo_args(p: argparse.ArgumentParser):
-    p.add_argument("--model_name", type=str, default=PROPERTY_DEFAULTS["model_name"])
-    p.add_argument("--unimol_dict", type=str, default=PROPERTY_DEFAULTS["unimol_dict"])
-    p.add_argument("--unimol_ckpt", type=str, default=PROPERTY_DEFAULTS["unimol_ckpt"] or "")
-    p.add_argument("--init_ckpt", type=str, default=PROPERTY_DEFAULTS["init_ckpt"])
-    p.add_argument("--lora_r", type=int, default=PROPERTY_DEFAULTS["lora_r"])
-    p.add_argument("--lora_alpha", type=int, default=PROPERTY_DEFAULTS["lora_alpha"])
-    p.add_argument("--lora_target", type=str, default=PROPERTY_DEFAULTS["lora_target"])
+    p.add_argument("--model_name", type=str, default=STAGE2_DEFAULTS["model_name"])
+    p.add_argument(
+        "--3D_encoder_dict",
+        dest="three_d_encoder_dict",
+        type=str,
+        default=STAGE2_DEFAULTS["3D_encoder_dict"],
+    )
+    p.add_argument("--Stage2_ckpt", dest="stage2_ckpt", type=str, default=STAGE2_DEFAULTS["output_dir"])
+    p.add_argument("--lora_r", type=int, default=STAGE2_DEFAULTS["lora_r"])
+    p.add_argument("--lora_alpha", type=int, default=STAGE2_DEFAULTS["lora_alpha"])
+    p.add_argument("--lora_target", type=str, default=STAGE2_DEFAULTS["lora_target"])
     p.add_argument(
         "--smiles",
         type=str,
@@ -230,7 +127,7 @@ def add_demo_args(p: argparse.ArgumentParser):
         "--xyz",
         type=str,
         default=DEFAULT_XYZ,
-        help="Path to XYZ file with the 3D structure (Uni-Mol input).",
+        help="Path to XYZ file with the 3D structure (3D encoder input).",
     )
     p.add_argument(
         "--instruction",
@@ -269,13 +166,13 @@ def add_demo_args(p: argparse.ArgumentParser):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generic demo: SMILES + XYZ + free-form instruction with BOS 3D conditioning.",
+        description="Generic demo: SMILES + XYZ + free-form instruction with single-token 3D conditioning.",
     )
     add_demo_args(parser)
     args = parser.parse_args()
 
-    if not args.init_ckpt or not os.path.isdir(args.init_ckpt):
-        print("--init_ckpt must be a directory with adapter + unimol.pt + bos_projection.*", file=sys.stderr)
+    if not args.stage2_ckpt or not os.path.isdir(args.stage2_ckpt):
+        print("--Stage2_ckpt must be a directory with adapter + 3D_encoder.pt + single_token_projection.*", file=sys.stderr)
         sys.exit(1)
 
     instruction = args.instruction
@@ -296,7 +193,7 @@ def main():
             append_smiles=not args.no_append_smiles,
         )
         atoms, coords = prepare_geometry(xyz_path)
-        text = generate_with_bos_structure(
+        text = generate_with_single_token_structure(
             model,
             tokenizer,
             atoms,

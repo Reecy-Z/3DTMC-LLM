@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from unicore import utils
 from unicore.models import BaseUnicoreModel, register_model, register_model_architecture
 from unicore.modules import LayerNorm, init_bert_params
-from .transformer_encoder_with_pair import TransformerEncoderWithPair
+from transformer_encoder_with_pair import TransformerEncoderWithPair
 from typing import Dict, Any, List
 
 
@@ -231,7 +231,7 @@ class UniMolModel(BaseUnicoreModel):
                 if padding_mask is not None:
                     atom_num = torch.sum(1 - padding_mask.type_as(x), dim=1).view(
                         -1, 1, 1, 1
-                    )  # consider BOS and EOS as part of the object
+                    )  # consider single-token and EOS as part of the object
                 else:
                     atom_num = src_coord.shape[1]
                 delta_pos = coords_emb.unsqueeze(1) - coords_emb.unsqueeze(2)

@@ -1,8 +1,8 @@
 """
-Stage1 SFT (scheme C): instruction + Uni-Mol + single-token BOS projection (BosProjectionLayer).
-Response is enriched_description from LMDB; LLM is frozen; train Uni-Mol + BosProjection.
+Stage1 SFT: instruction + 3D encoder + single-token projection layer.
+Response is description from LMDB; LLM is frozen; train 3D encoder + single-token projection.
 Dataset: tmQM stage1 train/val LMDB paths.
-Each LMDB record needs atoms, coordinates, smiles, enriched_description.
+Each LMDB record needs atoms, coordinates, smiles, description.
 
 Usage: CUDA_VISIBLE_DEVICES=2,3 deepspeed --num_gpus=2 Stage1.py
 """
@@ -20,20 +20,22 @@ import utils  # noqa: F401
 from utils import (
     ATOM_DIM,
     MAX_SEQ_LENGTH,
-    BridgeUnimolCollator,
+    SINGLE_TOKEN_PROJECTION_SAFETENSORS,
+    THREE_D_ENCODER_STATE_PT,
+    MultimodalCollator,
     _atoms_coords_remove_h_center,
     read_lmdb,
     tokenize_generation_sample_object_ref,
     unwrap_hf_model,
 )
-from bos_unimol_qwen_model import BosUnimolQwenModel, RECIPE_STAGE1
+from multimodal_LLM import RECIPE_STAGE1, MultimodalModel
 from train_defaults import STAGE1_DEFAULTS
 
-INSTRUCTION = "Give me an introduction to this transition metal complex:"
+INSTRUCTION = "Give me a description of this transition metal complex:"
 
 
-class TmQMIntroBridgeUnimolDataset(Dataset):
-    """tmQM stage1 LMDB: atoms, coordinates, smiles, enriched_description; BOS slot for frozen-LLM Stage1."""
+class TmQMDescriptionDataset(Dataset):
+    """tmQM stage1 LMDB: atoms, coordinates, smiles, description; single-token slot for frozen-LLM Stage1."""
 
     def __init__(self, lmdb_paths, tokenizer, max_length=512, max_samples=None):
         self.tokenizer = tokenizer
@@ -44,18 +46,18 @@ class TmQMIntroBridgeUnimolDataset(Dataset):
                 continue
             raw = read_lmdb(p, max_samples=max_samples)
             for d in raw:
-                if "atoms" not in d or "coordinates" not in d or "smiles" not in d or "enriched_description" not in d:
+                if "atoms" not in d or "coordinates" not in d or "smiles" not in d or "description" not in d:
                     continue
-                desc = d.get("enriched_description")
+                desc = d.get("description")
                 if not desc or (isinstance(desc, str) and not desc.strip()):
                     continue
                 self.samples.append(d)
         if not self.samples and int(os.environ.get("LOCAL_RANK", 0)) == 0:
             raise RuntimeError(
-                f"No valid samples (need atoms, coordinates, smiles, enriched_description): {lmdb_paths}."
+                f"No valid samples (need atoms, coordinates, smiles, description): {lmdb_paths}."
             )
         if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-            print(f"[TmQMIntroBridgeUnimolDataset] {len(self.samples)} samples; response=enriched_description.")
+            print(f"[TmQMDescriptionDataset] {len(self.samples)} samples; response=description.")
 
     def __len__(self):
         return len(self.samples)
@@ -63,7 +65,7 @@ class TmQMIntroBridgeUnimolDataset(Dataset):
     def __getitem__(self, idx):
         data = self.samples[idx]
         smiles = data["smiles"]
-        response = data["enriched_description"]
+        response = data["description"]
         if not isinstance(response, str):
             response = str(response) if response is not None else ""
         atoms = data["atoms"]
@@ -86,7 +88,7 @@ class TmQMIntroBridgeUnimolDataset(Dataset):
         return {**ids, "atoms": atoms, "coordinates": coords}
 
 
-class BridgeUnimolTrainer(Trainer):
+class Stage1Trainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         outputs = model(**inputs)
         return (outputs.loss, outputs) if return_outputs else outputs.loss
@@ -100,21 +102,20 @@ class BridgeUnimolTrainer(Trainer):
         model = unwrap_hf_model(self.model)
         model.tokenizer.save_pretrained(output_dir)
 
-        bos_proj_state = {f"bos_projection.{k}": v.cpu() for k, v in model.bos_projection_layer.state_dict().items()}
-        save_file(bos_proj_state, os.path.join(output_dir, "bos_projection.safetensors"))
+        proj_state = {f"single_token_projection.{k}": v.cpu() for k, v in model.single_token_projection_layer.state_dict().items()}
+        save_file(proj_state, os.path.join(output_dir, SINGLE_TOKEN_PROJECTION_SAFETENSORS))
 
-        torch.save({"model": model.unimol.state_dict()}, os.path.join(output_dir, "unimol.pt"))
-        with open(os.path.join(output_dir, "bridge_config.json"), "w", encoding="utf-8") as f:
+        torch.save({"model": model.unimol.state_dict()}, os.path.join(output_dir, THREE_D_ENCODER_STATE_PT))
+        with open(os.path.join(output_dir, "multimodal_config.json"), "w", encoding="utf-8") as f:
             json.dump({
-                "scheme": "C",
                 "atom_dim": ATOM_DIM,
-                "bos_only": True,
+                "single_token_only": True,
             }, f, indent=2)
 
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Stage1: intro + Uni-Mol scheme C (BOS projection only), frozen LLM")
+    parser = argparse.ArgumentParser(description="Stage1: description + 3D encoder (single-token projection only), frozen LLM")
     parser.add_argument(
         "--model_name",
         type=str,
@@ -122,15 +123,17 @@ if __name__ == "__main__":
         help="HF causal LM directory",
     )
     parser.add_argument(
-        "--unimol_ckpt",
+        "--3D_encoder_ckpt",
+        dest="three_d_encoder_ckpt",
         type=str,
-        default=STAGE1_DEFAULTS["unimol_ckpt"],
-        help="Uni-Mol pretrained weights (.pt or directory with model.safetensors)",
+        default=STAGE1_DEFAULTS["3D_encoder_ckpt"],
+        help="3D encoder pretrained weights (.pt or directory with model.safetensors)",
     )
     parser.add_argument(
-        "--unimol_dict",
+        "--3D_encoder_dict",
+        dest="three_d_encoder_dict",
         type=str,
-        default=STAGE1_DEFAULTS["unimol_dict"],
+        default=STAGE1_DEFAULTS["3D_encoder_dict"],
     )
     parser.add_argument(
         "--train_lmdb",
@@ -161,26 +164,26 @@ if __name__ == "__main__":
 
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     if local_rank == 0:
-        wandb.init(project="sft_intro_stage1_scheme_c")
-        print("[Stage1] intro + Uni-Mol scheme C (BOS single-token projection); response=enriched_description; LLM frozen.")
+        wandb.init(project="Stage1")
+        print("[Stage1] description + 3D encoder (single-token projection); response=description; LLM frozen.")
 
     tokenizer = AutoTokenizer.from_pretrained(args_main.model_name)
-    model = BosUnimolQwenModel(
+    model = MultimodalModel(
         args_main.model_name,
-        args_main.unimol_dict,
+        args_main.three_d_encoder_dict,
         recipe=RECIPE_STAGE1,
-        unimol_checkpoint=args_main.unimol_ckpt,
+        three_d_encoder_ckpt=args_main.three_d_encoder_ckpt,
     )
-    train_dataset = TmQMIntroBridgeUnimolDataset(
+    train_dataset = TmQMDescriptionDataset(
         args_main.train_lmdb, tokenizer=tokenizer, max_length=MAX_SEQ_LENGTH, max_samples=None
     )
-    val_dataset = TmQMIntroBridgeUnimolDataset(
+    val_dataset = TmQMDescriptionDataset(
         [args_main.val_lmdb], tokenizer=tokenizer, max_length=MAX_SEQ_LENGTH, max_samples=None
     )
     if local_rank == 0:
         print(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
 
-    data_collator = BridgeUnimolCollator(tokenizer)
+    data_collator = MultimodalCollator(tokenizer)
     ds_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ds_config.json")
     training_args = TrainingArguments(
         output_dir=output_dir,
@@ -194,7 +197,7 @@ if __name__ == "__main__":
         lr_scheduler_type="cosine",
         weight_decay=0.05,
         logging_steps=10,
-        save_steps=1000,
+        save_steps=1,
         save_strategy="steps",
         eval_strategy="steps",
         eval_steps=1000,
@@ -210,5 +213,5 @@ if __name__ == "__main__":
         metric_for_best_model="eval_loss",
         greater_is_better=False,
     )
-    trainer = BridgeUnimolTrainer(model=model, args=training_args, train_dataset=train_dataset, eval_dataset=val_dataset, data_collator=data_collator)
+    trainer = Stage1Trainer(model=model, args=training_args, train_dataset=train_dataset, eval_dataset=val_dataset, data_collator=data_collator)
     trainer.train()
