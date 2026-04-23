@@ -143,9 +143,9 @@ For a **single** split without the loop, call **`Stage3/Vaska_Complex.py`** dire
 CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Stage3/Vaska_Complex.py --split_seed 1
 ```
 
-**Paper correction (Vaska complex, 10 random splits).** In the manuscript, **Figure 5B** and **Figures S8–S16** summarize Vaska-type barrier prediction over **ten** random train/val/test splits. Those results were affected by an evaluation bug: at test time, **every run reused the test set from the first split** instead of the test fold matched to each seed’s split. That **data leakage** inflated the reported metrics. We **fixed the code**, **re-ran** the ten-seed pipeline, and ship the corrected outputs under **`Vaska_Complex_Results/`** (JSONs and plots from `run_vaska_ten_splits.sh` / `plot_vaska_barrier.py`). On the corrected evaluation, aggregated across 10 seeds: **MAE = 0.7186 ± 0.0323 kcal/mol**, **R² = 0.9429 ± 0.0074**.
-
 Hyperparameters and paths: **`train_defaults.py`** (`PROPERTY_DEFAULTS`, `NICOMPLEX_DEFAULTS`, `VASKA_DEFAULTS`).
+
+<span style="text-decoration:underline;"><span style="color:#d1242f;"><strong>Paper correction (Vaska complex, 10 random splits).</strong></span> In the manuscript, **Figure 5B** and **Figures S8–S16** summarize Vaska-type barrier prediction over **ten** random train/val/test splits. Those results were affected by an evaluation bug: at test time, **every run reused the test set from the first split** instead of the test fold matched to each seed’s split. That **data leakage** inflated the reported metrics. We **fixed the code**, **re-ran** the ten-seed pipeline, and ship the corrected outputs under **`Vaska_Complex_Results/`** (JSONs and plots from `run_vaska_ten_splits.sh` / `plot_vaska_barrier.py`). On the corrected evaluation, aggregated across 10 seeds: **MAE = 0.7186 ± 0.0323 kcal/mol**, **R² = 0.9429 ± 0.0074**, the best **MAE** and **R2** is **0.6781** and **0.9565**.</span>
 
 ---
 
