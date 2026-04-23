@@ -1,0 +1,15 @@
+n_seeds = 10
+MAE mean = 0.718571 kcal/mol, std = 0.032282
+R²  mean = 0.942932, std = 0.007362
+
+per_seed:
+  seed=1  MAE=0.750510  R2=0.934140  N=196  file=Vaska_Complex_Results/pred_vaska_barrier_seed_1.json
+  seed=10  MAE=0.717857  R2=0.943851  N=196  file=Vaska_Complex_Results/pred_vaska_barrier_seed_10.json
+  seed=2  MAE=0.755102  R2=0.947321  N=196  file=Vaska_Complex_Results/pred_vaska_barrier_seed_2.json
+  seed=3  MAE=0.689286  R2=0.935880  N=196  file=Vaska_Complex_Results/pred_vaska_barrier_seed_3.json
+  seed=4  MAE=0.771939  R2=0.936710  N=196  file=Vaska_Complex_Results/pred_vaska_barrier_seed_4.json
+  seed=5  MAE=0.706122  R2=0.936389  N=196  file=Vaska_Complex_Results/pred_vaska_barrier_seed_5.json
+  seed=6  MAE=0.697449  R2=0.943827  N=196  file=Vaska_Complex_Results/pred_vaska_barrier_seed_6.json
+  seed=7  MAE=0.688265  R2=0.943186  N=196  file=Vaska_Complex_Results/pred_vaska_barrier_seed_7.json
+  seed=8  MAE=0.678061  R2=0.956549  N=196  file=Vaska_Complex_Results/pred_vaska_barrier_seed_8.json
+  seed=9  MAE=0.731122  R2=0.951464  N=196  file=Vaska_Complex_Results/pred_vaska_barrier_seed_9.json

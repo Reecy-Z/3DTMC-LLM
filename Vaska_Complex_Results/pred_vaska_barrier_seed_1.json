@@ -1,0 +1,982 @@
+[
+  {
+    "ref": 12.4,
+    "pred_text": "12.8",
+    "pred_value": 12.8
+  },
+  {
+    "ref": 7.9,
+    "pred_text": "7.6",
+    "pred_value": 7.6
+  },
+  {
+    "ref": 14.4,
+    "pred_text": "14.5",
+    "pred_value": 14.5
+  },
+  {
+    "ref": 5.5,
+    "pred_text": "8.7",
+    "pred_value": 8.7
+  },
+  {
+    "ref": 8.3,
+    "pred_text": "7.2",
+    "pred_value": 7.2
+  },
+  {
+    "ref": 13.3,
+    "pred_text": "14.0",
+    "pred_value": 14.0
+  },
+  {
+    "ref": 6.8,
+    "pred_text": "7.7",
+    "pred_value": 7.7
+  },
+  {
+    "ref": 11.5,
+    "pred_text": "12.5",
+    "pred_value": 12.5
+  },
+  {
+    "ref": 16.3,
+    "pred_text": "16.3",
+    "pred_value": 16.3
+  },
+  {
+    "ref": 8.3,
+    "pred_text": "9.0",
+    "pred_value": 9.0
+  },
+  {
+    "ref": 12.4,
+    "pred_text": "12.4",
+    "pred_value": 12.4
+  },
+  {
+    "ref": 20.8,
+    "pred_text": "20.5",
+    "pred_value": 20.5
+  },
+  {
+    "ref": 10.9,
+    "pred_text": "10.6",
+    "pred_value": 10.6
+  },
+  {
+    "ref": 16.1,
+    "pred_text": "15.4",
+    "pred_value": 15.4
+  },
+  {
+    "ref": 14.2,
+    "pred_text": "13.2",
+    "pred_value": 13.2
+  },
+  {
+    "ref": 3.6,
+    "pred_text": "4.3",
+    "pred_value": 4.3
+  },
+  {
+    "ref": 8.7,
+    "pred_text": "8.2",
+    "pred_value": 8.2
+  },
+  {
+    "ref": 17.1,
+    "pred_text": "15.8",
+    "pred_value": 15.8
+  },
+  {
+    "ref": 5.9,
+    "pred_text": "6.9",
+    "pred_value": 6.9
+  },
+  {
+    "ref": 13.2,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 20.3,
+    "pred_text": "20.1",
+    "pred_value": 20.1
+  },
+  {
+    "ref": 9.7,
+    "pred_text": "10.2",
+    "pred_value": 10.2
+  },
+  {
+    "ref": 7.4,
+    "pred_text": "8.2",
+    "pred_value": 8.2
+  },
+  {
+    "ref": 11.5,
+    "pred_text": "10.8",
+    "pred_value": 10.8
+  },
+  {
+    "ref": 13.3,
+    "pred_text": "13.8",
+    "pred_value": 13.8
+  },
+  {
+    "ref": 13.6,
+    "pred_text": "13.8",
+    "pred_value": 13.8
+  },
+  {
+    "ref": 8.3,
+    "pred_text": "9.6",
+    "pred_value": 9.6
+  },
+  {
+    "ref": 13.0,
+    "pred_text": "13.6",
+    "pred_value": 13.6
+  },
+  {
+    "ref": 10.1,
+    "pred_text": "10.3",
+    "pred_value": 10.3
+  },
+  {
+    "ref": 8.1,
+    "pred_text": "8.7",
+    "pred_value": 8.7
+  },
+  {
+    "ref": 16.8,
+    "pred_text": "19.0",
+    "pred_value": 19.0
+  },
+  {
+    "ref": 12.5,
+    "pred_text": "12.0",
+    "pred_value": 12.0
+  },
+  {
+    "ref": 6.0,
+    "pred_text": "4.0",
+    "pred_value": 4.0
+  },
+  {
+    "ref": 14.5,
+    "pred_text": "15.4",
+    "pred_value": 15.4
+  },
+  {
+    "ref": 16.6,
+    "pred_text": "18.6",
+    "pred_value": 18.6
+  },
+  {
+    "ref": 17.7,
+    "pred_text": "17.5",
+    "pred_value": 17.5
+  },
+  {
+    "ref": 14.4,
+    "pred_text": "13.6",
+    "pred_value": 13.6
+  },
+  {
+    "ref": 14.5,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 14.3,
+    "pred_text": "14.5",
+    "pred_value": 14.5
+  },
+  {
+    "ref": 8.9,
+    "pred_text": "9.1",
+    "pred_value": 9.1
+  },
+  {
+    "ref": 19.9,
+    "pred_text": "20.5",
+    "pred_value": 20.5
+  },
+  {
+    "ref": 9.4,
+    "pred_text": "9.5",
+    "pred_value": 9.5
+  },
+  {
+    "ref": 17.0,
+    "pred_text": "18.5",
+    "pred_value": 18.5
+  },
+  {
+    "ref": 6.7,
+    "pred_text": "6.5",
+    "pred_value": 6.5
+  },
+  {
+    "ref": 13.2,
+    "pred_text": "12.6",
+    "pred_value": 12.6
+  },
+  {
+    "ref": 7.6,
+    "pred_text": "6.2",
+    "pred_value": 6.2
+  },
+  {
+    "ref": 4.5,
+    "pred_text": "5.2",
+    "pred_value": 5.2
+  },
+  {
+    "ref": 13.8,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 6.6,
+    "pred_text": "6.7",
+    "pred_value": 6.7
+  },
+  {
+    "ref": 5.7,
+    "pred_text": "5.9",
+    "pred_value": 5.9
+  },
+  {
+    "ref": 10.9,
+    "pred_text": "10.4",
+    "pred_value": 10.4
+  },
+  {
+    "ref": 4.6,
+    "pred_text": "4.3",
+    "pred_value": 4.3
+  },
+  {
+    "ref": 8.2,
+    "pred_text": "8.7",
+    "pred_value": 8.7
+  },
+  {
+    "ref": 13.2,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 9.9,
+    "pred_text": "9.7",
+    "pred_value": 9.7
+  },
+  {
+    "ref": 11.5,
+    "pred_text": "11.0",
+    "pred_value": 11.0
+  },
+  {
+    "ref": 16.8,
+    "pred_text": "21.0",
+    "pred_value": 21.0
+  },
+  {
+    "ref": 12.8,
+    "pred_text": "12.0",
+    "pred_value": 12.0
+  },
+  {
+    "ref": 12.8,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 11.0,
+    "pred_text": "10.5",
+    "pred_value": 10.5
+  },
+  {
+    "ref": 5.8,
+    "pred_text": "4.3",
+    "pred_value": 4.3
+  },
+  {
+    "ref": 6.2,
+    "pred_text": "5.9",
+    "pred_value": 5.9
+  },
+  {
+    "ref": 10.9,
+    "pred_text": "10.6",
+    "pred_value": 10.6
+  },
+  {
+    "ref": 6.5,
+    "pred_text": "6.0",
+    "pred_value": 6.0
+  },
+  {
+    "ref": 7.5,
+    "pred_text": "8.2",
+    "pred_value": 8.2
+  },
+  {
+    "ref": 16.2,
+    "pred_text": "16.5",
+    "pred_value": 16.5
+  },
+  {
+    "ref": 14.0,
+    "pred_text": "13.6",
+    "pred_value": 13.6
+  },
+  {
+    "ref": 19.4,
+    "pred_text": "19.5",
+    "pred_value": 19.5
+  },
+  {
+    "ref": 8.9,
+    "pred_text": "7.9",
+    "pred_value": 7.9
+  },
+  {
+    "ref": 12.0,
+    "pred_text": "10.9",
+    "pred_value": 10.9
+  },
+  {
+    "ref": 11.4,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 8.4,
+    "pred_text": "8.7",
+    "pred_value": 8.7
+  },
+  {
+    "ref": 6.9,
+    "pred_text": "7.2",
+    "pred_value": 7.2
+  },
+  {
+    "ref": 13.0,
+    "pred_text": "13.8",
+    "pred_value": 13.8
+  },
+  {
+    "ref": 5.0,
+    "pred_text": "6.0",
+    "pred_value": 6.0
+  },
+  {
+    "ref": 18.3,
+    "pred_text": "16.2",
+    "pred_value": 16.2
+  },
+  {
+    "ref": 9.4,
+    "pred_text": "9.4",
+    "pred_value": 9.4
+  },
+  {
+    "ref": 19.9,
+    "pred_text": "19.5",
+    "pred_value": 19.5
+  },
+  {
+    "ref": 17.8,
+    "pred_text": "18.6",
+    "pred_value": 18.6
+  },
+  {
+    "ref": 12.7,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 13.4,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 16.3,
+    "pred_text": "18.9",
+    "pred_value": 18.9
+  },
+  {
+    "ref": 14.9,
+    "pred_text": "12.3",
+    "pred_value": 12.3
+  },
+  {
+    "ref": 18.9,
+    "pred_text": "18.6",
+    "pred_value": 18.6
+  },
+  {
+    "ref": 15.3,
+    "pred_text": "16.4",
+    "pred_value": 16.4
+  },
+  {
+    "ref": 13.2,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 17.6,
+    "pred_text": "16.8",
+    "pred_value": 16.8
+  },
+  {
+    "ref": 13.0,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 13.6,
+    "pred_text": "14.2",
+    "pred_value": 14.2
+  },
+  {
+    "ref": 12.2,
+    "pred_text": "14.0",
+    "pred_value": 14.0
+  },
+  {
+    "ref": 13.7,
+    "pred_text": "15.7",
+    "pred_value": 15.7
+  },
+  {
+    "ref": 16.1,
+    "pred_text": "15.0",
+    "pred_value": 15.0
+  },
+  {
+    "ref": 15.9,
+    "pred_text": "15.6",
+    "pred_value": 15.6
+  },
+  {
+    "ref": 9.5,
+    "pred_text": "9.7",
+    "pred_value": 9.7
+  },
+  {
+    "ref": 10.8,
+    "pred_text": "10.6",
+    "pred_value": 10.6
+  },
+  {
+    "ref": 18.1,
+    "pred_text": "18.5",
+    "pred_value": 18.5
+  },
+  {
+    "ref": 12.7,
+    "pred_text": "12.0",
+    "pred_value": 12.0
+  },
+  {
+    "ref": 9.7,
+    "pred_text": "9.7",
+    "pred_value": 9.7
+  },
+  {
+    "ref": 11.2,
+    "pred_text": "12.0",
+    "pred_value": 12.0
+  },
+  {
+    "ref": 14.5,
+    "pred_text": "14.7",
+    "pred_value": 14.7
+  },
+  {
+    "ref": 20.8,
+    "pred_text": "20.5",
+    "pred_value": 20.5
+  },
+  {
+    "ref": 12.3,
+    "pred_text": "13.8",
+    "pred_value": 13.8
+  },
+  {
+    "ref": 14.1,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 15.2,
+    "pred_text": "17.0",
+    "pred_value": 17.0
+  },
+  {
+    "ref": 19.0,
+    "pred_text": "20.5",
+    "pred_value": 20.5
+  },
+  {
+    "ref": 11.3,
+    "pred_text": "12.5",
+    "pred_value": 12.5
+  },
+  {
+    "ref": 8.4,
+    "pred_text": "10.7",
+    "pred_value": 10.7
+  },
+  {
+    "ref": 14.0,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 12.5,
+    "pred_text": "12.0",
+    "pred_value": 12.0
+  },
+  {
+    "ref": 13.0,
+    "pred_text": "13.2",
+    "pred_value": 13.2
+  },
+  {
+    "ref": 9.4,
+    "pred_text": "11.0",
+    "pred_value": 11.0
+  },
+  {
+    "ref": 15.8,
+    "pred_text": "14.6",
+    "pred_value": 14.6
+  },
+  {
+    "ref": 10.0,
+    "pred_text": "10.9",
+    "pred_value": 10.9
+  },
+  {
+    "ref": 15.5,
+    "pred_text": "15.2",
+    "pred_value": 15.2
+  },
+  {
+    "ref": 13.4,
+    "pred_text": "16.2",
+    "pred_value": 16.2
+  },
+  {
+    "ref": 12.7,
+    "pred_text": "12.4",
+    "pred_value": 12.4
+  },
+  {
+    "ref": 16.1,
+    "pred_text": "16.4",
+    "pred_value": 16.4
+  },
+  {
+    "ref": 7.8,
+    "pred_text": "8.2",
+    "pred_value": 8.2
+  },
+  {
+    "ref": 13.6,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 8.2,
+    "pred_text": "7.2",
+    "pred_value": 7.2
+  },
+  {
+    "ref": 11.4,
+    "pred_text": "10.9",
+    "pred_value": 10.9
+  },
+  {
+    "ref": 4.7,
+    "pred_text": "5.6",
+    "pred_value": 5.6
+  },
+  {
+    "ref": 17.0,
+    "pred_text": "18.9",
+    "pred_value": 18.9
+  },
+  {
+    "ref": 18.2,
+    "pred_text": "18.6",
+    "pred_value": 18.6
+  },
+  {
+    "ref": 13.2,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 10.7,
+    "pred_text": "10.4",
+    "pred_value": 10.4
+  },
+  {
+    "ref": 15.8,
+    "pred_text": "16.5",
+    "pred_value": 16.5
+  },
+  {
+    "ref": 6.6,
+    "pred_text": "7.1",
+    "pred_value": 7.1
+  },
+  {
+    "ref": 6.2,
+    "pred_text": "6.7",
+    "pred_value": 6.7
+  },
+  {
+    "ref": 7.6,
+    "pred_text": "7.6",
+    "pred_value": 7.6
+  },
+  {
+    "ref": 12.5,
+    "pred_text": "12.4",
+    "pred_value": 12.4
+  },
+  {
+    "ref": 6.9,
+    "pred_text": "5.4",
+    "pred_value": 5.4
+  },
+  {
+    "ref": 6.3,
+    "pred_text": "8.2",
+    "pred_value": 8.2
+  },
+  {
+    "ref": 9.9,
+    "pred_text": "9.8",
+    "pred_value": 9.8
+  },
+  {
+    "ref": 9.4,
+    "pred_text": "10.2",
+    "pred_value": 10.2
+  },
+  {
+    "ref": 8.9,
+    "pred_text": "9.7",
+    "pred_value": 9.7
+  },
+  {
+    "ref": 13.5,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 5.9,
+    "pred_text": "5.2",
+    "pred_value": 5.2
+  },
+  {
+    "ref": 7.7,
+    "pred_text": "10.2",
+    "pred_value": 10.2
+  },
+  {
+    "ref": 16.0,
+    "pred_text": "17.3",
+    "pred_value": 17.3
+  },
+  {
+    "ref": 14.7,
+    "pred_text": "13.7",
+    "pred_value": 13.7
+  },
+  {
+    "ref": 16.1,
+    "pred_text": "17.5",
+    "pred_value": 17.5
+  },
+  {
+    "ref": 9.4,
+    "pred_text": "10.7",
+    "pred_value": 10.7
+  },
+  {
+    "ref": 12.7,
+    "pred_text": "12.3",
+    "pred_value": 12.3
+  },
+  {
+    "ref": 11.8,
+    "pred_text": "12.3",
+    "pred_value": 12.3
+  },
+  {
+    "ref": 14.5,
+    "pred_text": "14.7",
+    "pred_value": 14.7
+  },
+  {
+    "ref": 12.2,
+    "pred_text": "12.0",
+    "pred_value": 12.0
+  },
+  {
+    "ref": 18.7,
+    "pred_text": "19.5",
+    "pred_value": 19.5
+  },
+  {
+    "ref": 14.9,
+    "pred_text": "15.3",
+    "pred_value": 15.3
+  },
+  {
+    "ref": 13.7,
+    "pred_text": "12.5",
+    "pred_value": 12.5
+  },
+  {
+    "ref": 20.1,
+    "pred_text": "21.6",
+    "pred_value": 21.6
+  },
+  {
+    "ref": 17.6,
+    "pred_text": "18.5",
+    "pred_value": 18.5
+  },
+  {
+    "ref": 9.6,
+    "pred_text": "9.0",
+    "pred_value": 9.0
+  },
+  {
+    "ref": 11.8,
+    "pred_text": "12.5",
+    "pred_value": 12.5
+  },
+  {
+    "ref": 7.6,
+    "pred_text": "7.3",
+    "pred_value": 7.3
+  },
+  {
+    "ref": 20.7,
+    "pred_text": "20.1",
+    "pred_value": 20.1
+  },
+  {
+    "ref": 13.3,
+    "pred_text": "13.0",
+    "pred_value": 13.0
+  },
+  {
+    "ref": 11.1,
+    "pred_text": "10.9",
+    "pred_value": 10.9
+  },
+  {
+    "ref": 11.9,
+    "pred_text": "12.6",
+    "pred_value": 12.6
+  },
+  {
+    "ref": 8.6,
+    "pred_text": "7.2",
+    "pred_value": 7.2
+  },
+  {
+    "ref": 9.7,
+    "pred_text": "9.0",
+    "pred_value": 9.0
+  },
+  {
+    "ref": 8.7,
+    "pred_text": "9.4",
+    "pred_value": 9.4
+  },
+  {
+    "ref": 8.3,
+    "pred_text": "8.7",
+    "pred_value": 8.7
+  },
+  {
+    "ref": 8.4,
+    "pred_text": "8.4",
+    "pred_value": 8.4
+  },
+  {
+    "ref": 8.5,
+    "pred_text": "8.7",
+    "pred_value": 8.7
+  },
+  {
+    "ref": 12.0,
+    "pred_text": "12.0",
+    "pred_value": 12.0
+  },
+  {
+    "ref": 8.5,
+    "pred_text": "9.0",
+    "pred_value": 9.0
+  },
+  {
+    "ref": 16.7,
+    "pred_text": "17.5",
+    "pred_value": 17.5
+  },
+  {
+    "ref": 13.6,
+    "pred_text": "12.3",
+    "pred_value": 12.3
+  },
+  {
+    "ref": 5.8,
+    "pred_text": "6.2",
+    "pred_value": 6.2
+  },
+  {
+    "ref": 12.7,
+    "pred_text": "12.6",
+    "pred_value": 12.6
+  },
+  {
+    "ref": 9.8,
+    "pred_text": "9.7",
+    "pred_value": 9.7
+  },
+  {
+    "ref": 8.8,
+    "pred_text": "8.6",
+    "pred_value": 8.6
+  },
+  {
+    "ref": 13.7,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 5.5,
+    "pred_text": "5.3",
+    "pred_value": 5.3
+  },
+  {
+    "ref": 9.3,
+    "pred_text": "8.3",
+    "pred_value": 8.3
+  },
+  {
+    "ref": 6.7,
+    "pred_text": "6.7",
+    "pred_value": 6.7
+  },
+  {
+    "ref": 12.1,
+    "pred_text": "12.0",
+    "pred_value": 12.0
+  },
+  {
+    "ref": 16.4,
+    "pred_text": "17.5",
+    "pred_value": 17.5
+  },
+  {
+    "ref": 9.0,
+    "pred_text": "9.2",
+    "pred_value": 9.2
+  },
+  {
+    "ref": 9.2,
+    "pred_text": "9.4",
+    "pred_value": 9.4
+  },
+  {
+    "ref": 8.9,
+    "pred_text": "9.7",
+    "pred_value": 9.7
+  },
+  {
+    "ref": 15.0,
+    "pred_text": "18.0",
+    "pred_value": 18.0
+  },
+  {
+    "ref": 7.0,
+    "pred_text": "8.9",
+    "pred_value": 8.9
+  },
+  {
+    "ref": 10.6,
+    "pred_text": "10.9",
+    "pred_value": 10.9
+  },
+  {
+    "ref": 11.0,
+    "pred_text": "10.6",
+    "pred_value": 10.6
+  },
+  {
+    "ref": 14.7,
+    "pred_text": "14.7",
+    "pred_value": 14.7
+  },
+  {
+    "ref": 4.6,
+    "pred_text": "3.1",
+    "pred_value": 3.1
+  },
+  {
+    "ref": 5.9,
+    "pred_text": "5.6",
+    "pred_value": 5.6
+  },
+  {
+    "ref": 11.8,
+    "pred_text": "14.0",
+    "pred_value": 14.0
+  },
+  {
+    "ref": 18.2,
+    "pred_text": "18.4",
+    "pred_value": 18.4
+  },
+  {
+    "ref": 12.3,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 9.6,
+    "pred_text": "9.0",
+    "pred_value": 9.0
+  },
+  {
+    "ref": 14.5,
+    "pred_text": "14.2",
+    "pred_value": 14.2
+  },
+  {
+    "ref": 12.9,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  },
+  {
+    "ref": 13.9,
+    "pred_text": "13.4",
+    "pred_value": 13.4
+  }
+]

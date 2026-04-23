@@ -135,13 +135,15 @@ To **test Vaska barrier** with **10 different random 80/10/10 splits**, run from
 bash run_vaska_ten_splits.sh
 ```
 
-The script trains **Stage3/Vaska_Complex.py** (2 GPUs) for each seed, runs **`inference_Vaska_Complex.py`**, and writes one JSON per seed under **`Vaska_Complex_Results/`** (e.g. `pred_vaska_barrier_seed_38.json`). Seeds whose prediction file already exists and is non-empty are **skipped** so you can resume. Paths and hyperparameters come from **`train_defaults.py`** (`VASKA_DEFAULTS`, including LMDB and `Stage2_ckpt`); adjust there or pass overrides if your fork uses different locations. At the end it runs **`plot_vaska_barrier.py`** on the collected JSON files.
+The script trains **Stage3/Vaska_Complex.py** (2 GPUs) for each seed, runs **`inference_Vaska_Complex.py`**, and writes one JSON per seed under **`Vaska_Complex_Results/`** (e.g. `pred_vaska_barrier_seed_1.json`). Seeds whose prediction file already exists and is non-empty are **skipped** so you can resume. Paths and hyperparameters come from **`train_defaults.py`** (`VASKA_DEFAULTS`, including LMDB and `Stage2_ckpt`); adjust there or pass overrides if your fork uses different locations. At the end it runs **`plot_vaska_barrier.py`** on the collected JSON files.
 
 For a **single** split without the loop, call **`Stage3/Vaska_Complex.py`** directly, e.g.:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Stage3/Vaska_Complex.py --split_seed 38
+CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Stage3/Vaska_Complex.py --split_seed 1
 ```
+
+**Paper correction (Vaska complex, 10 random splits).** In the manuscript, **Figure 5B** and **Figures S8–S16** summarize Vaska-type barrier prediction over **ten** random train/val/test splits. Those results were affected by an evaluation bug: at test time, **every run reused the test set from the first split** instead of the test fold matched to each seed’s split. That **data leakage** inflated the reported metrics. We **fixed the code**, **re-ran** the ten-seed pipeline, and ship the corrected outputs under **`Vaska_Complex_Results/`** (JSONs and plots from `run_vaska_ten_splits.sh` / `plot_vaska_barrier.py`). On the corrected evaluation, aggregated across 10 seeds: **MAE = 0.7186 ± 0.0323 kcal/mol**, **R² = 0.9429 ± 0.0074**.
 
 Hyperparameters and paths: **`train_defaults.py`** (`PROPERTY_DEFAULTS`, `NICOMPLEX_DEFAULTS`, `VASKA_DEFAULTS`).
 
