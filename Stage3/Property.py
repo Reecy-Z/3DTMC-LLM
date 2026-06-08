@@ -52,8 +52,9 @@ PROPERTY_CONFIG = {
     "homo_lumo_gap": {
         "key": "homo_lumo_gap",
         "unit": "Ha",
+        "instruction_smiles": "What is the HOMO-LUMO gap (in Ha) of this transition metal complex? Given the SMILES and structure, respond with the numerical value only:",
         "instruction_description": "What is the HOMO-LUMO gap (in Ha) of this transition metal complex? Given the description, SMILES and structure, respond with the numerical value only:",
-        "output_dir_suffix": "homo_lumo_gap_description",
+        "output_dir_suffix": "homo_lumo_gap",
     },
 }
 
@@ -66,11 +67,18 @@ class TmQMgSingleTokenUnimolDataset(Dataset):
         max_samples=None,
         property_key="dipole_moment",
         instruction=None,
+        use_polished_description=False,
     ):
         self.tokenizer = tokenizer
         self.property_key = property_key
+        self.use_polished_description = use_polished_description
         pcfg = PROPERTY_CONFIG.get(property_key, PROPERTY_CONFIG["dipole_moment"])
-        self.instruction = instruction or pcfg.get("instruction_description") or pcfg["instruction_smiles"]
+        if instruction is not None:
+            self.instruction = instruction
+        elif use_polished_description:
+            self.instruction = pcfg.get("instruction_description") or pcfg["instruction_smiles"]
+        else:
+            self.instruction = pcfg.get("instruction_smiles") or pcfg.get("instruction_description")
         self.key_index = []
         self._envs = {}
         nan_skipped = 0
@@ -146,7 +154,7 @@ class TmQMgSingleTokenUnimolDataset(Dataset):
         if coords.ndim == 3:
             coords = coords[0]
         atoms, coords = _atoms_coords_remove_h_center(atoms, coords)
-        if self.property_key == "homo_lumo_gap" and "polished_description" in data:
+        if self.use_polished_description and self.property_key == "homo_lumo_gap" and "polished_description" in data:
             desc = data.get("polished_description")
             if isinstance(desc, bytes):
                 desc = desc.decode("utf-8", errors="ignore")
@@ -225,6 +233,12 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=PROPERTY_DEFAULTS["epochs"], help="Number of epochs (default 3)")
     parser.add_argument("--lr", type=float, default=PROPERTY_DEFAULTS["lr"], help="Learning rate (default 5e-5)")
     parser.add_argument("--batch_size", type=int, default=PROPERTY_DEFAULTS["batch_size"], help="per_device_train_batch_size (default 4)")
+    parser.add_argument(
+        "--use_polished_description",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="HOMO-LUMO only: prepend polished_description to prompt (default off; SMILES+3D only).",
+    )
     parser.add_argument("--local_rank", type=int, default=-1)
     args_main = parser.parse_args()
     try:
@@ -239,11 +253,17 @@ if __name__ == "__main__":
     prop_cfg = PROPERTY_CONFIG[args_main.property]
     prop_key = prop_cfg["key"]
 
-    instruction_use = prop_cfg.get("instruction_description") or prop_cfg["instruction_smiles"]
+    if args_main.use_polished_description:
+        instruction_use = prop_cfg.get("instruction_description") or prop_cfg["instruction_smiles"]
+    else:
+        instruction_use = prop_cfg.get("instruction_smiles") or prop_cfg.get("instruction_description")
 
     if local_rank == 0:
         wandb.init(project=f"Stage3_Property_{prop_cfg['output_dir_suffix']}")
-        print(f"[Property] property={args_main.property}, generation (single-token projection + CE)")
+        print(
+            f"[Property] property={args_main.property}, generation (single-token projection + CE); "
+            f"prompt={'description+SMILES+3D' if args_main.use_polished_description else 'SMILES+3D'}"
+        )
 
     tokenizer = AutoTokenizer.from_pretrained(args_main.model_name)
 
@@ -267,6 +287,7 @@ if __name__ == "__main__":
         max_samples=None,
         property_key=prop_key,
         instruction=instruction_use,
+        use_polished_description=args_main.use_polished_description,
     )
     val_dataset = TmQMgSingleTokenUnimolDataset(
         [args_main.val_lmdb],
@@ -274,6 +295,7 @@ if __name__ == "__main__":
         max_samples=None,
         property_key=prop_key,
         instruction=instruction_use,
+        use_polished_description=args_main.use_polished_description,
     )
     if local_rank == 0:
         print(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")

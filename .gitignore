@@ -1,4 +1,5 @@
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 .Python
@@ -11,3 +12,6 @@ venv/
 .mypy_cache/
 .DS_Store
 .history/
+.wandb/
+wandb/
+.vendor/

@@ -114,6 +114,7 @@ class MultimodalModel(nn.Module):
         train_projection: Optional[bool] = None,
         train_lora: bool = True,
         load_pretrained_projection: bool = True,
+        load_pretrained_lora: bool = True,
         lora_r: int = 8,
         lora_alpha: int = 32,
         lora_target: str = "qv",
@@ -142,6 +143,7 @@ class MultimodalModel(nn.Module):
         self._train_projection = train_projection
         self._train_lora = train_lora
         self._load_pretrained_projection = load_pretrained_projection
+        self._load_pretrained_lora = load_pretrained_lora
 
         in_distributed = os.environ.get("LOCAL_RANK") is not None
         device_map = None if in_distributed else "auto"
@@ -272,7 +274,7 @@ class MultimodalModel(nn.Module):
                     print(f"[3DTMC-LLM] Loaded 3D encoder from {three_d_encoder_load_path}")
 
                 adapter_config = os.path.join(init_ckpt, "adapter_config.json")
-                if os.path.isfile(adapter_config):
+                if os.path.isfile(adapter_config) and self._load_pretrained_lora:
                     self.llm = PeftModel.from_pretrained(llm, init_ckpt, is_trainable=True)
                     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
                         print(f"[3DTMC-LLM] Loaded LoRA from {init_ckpt}")
@@ -287,7 +289,13 @@ class MultimodalModel(nn.Module):
                     )
                     self.llm = get_peft_model(llm, lora_config)
                     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                        print(f"[3DTMC-LLM] Created new LoRA (r={self._lora_r})")
+                        if os.path.isfile(adapter_config) and not self._load_pretrained_lora:
+                            print(
+                                f"[3DTMC-LLM] Created new LoRA (r={self._lora_r}); "
+                                "skipped Stage2 adapter (load_pretrained_lora=False)"
+                            )
+                        else:
+                            print(f"[3DTMC-LLM] Created new LoRA (r={self._lora_r})")
             else:
                 loaded_three_d_encoder = False
                 if three_d_encoder_ckpt:
@@ -341,7 +349,14 @@ class MultimodalModel(nn.Module):
                     three_d_encoder_source = three_d_encoder_pt_in_ckpt
                 else:
                     three_d_encoder_source = "random_init"
-                lora_source = init_ckpt if os.path.isfile(os.path.join(init_ckpt, "adapter_config.json")) else "new"
+                lora_source = (
+                    init_ckpt
+                    if (
+                        self._load_pretrained_lora
+                        and os.path.isfile(os.path.join(init_ckpt, "adapter_config.json"))
+                    )
+                    else "new"
+                )
             else:
                 three_d_encoder_source = three_d_encoder_ckpt if three_d_encoder_ckpt else "random_init"
                 lora_source = "new"
@@ -776,7 +791,11 @@ def generate_with_single_token_structure(
 
     with torch.inference_mode():
         out_ids = model.llm.generate(**gen_kwargs)
-    gen_ids = out_ids[0, prompt_len:]
+    # With inputs_embeds, HF generate often returns *only* new token ids (len << prompt_len).
+    if out_ids.shape[1] > prompt_len:
+        gen_ids = out_ids[0, prompt_len:]
+    else:
+        gen_ids = out_ids[0]
     return tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
 
 
