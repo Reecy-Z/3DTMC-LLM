@@ -5,13 +5,13 @@ with train/test split from cluster_split_k150_far_from_train.csv (cluster OOD).
 LMDB keys are CSD codes matching the CSV ``CSD code`` column.
 
 Example:
-  deepspeed --num_gpus=2 OOD/Property_OOD.py --property dipole_moment
+  deepspeed --num_gpus=2 OOD/property/Property_OOD.py --property dipole_moment
 """
 import os
 import sys
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(_SCRIPT_DIR))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 _STAGE3_DIR = os.path.join(_PROJECT_ROOT, "Stage3")
@@ -27,8 +27,8 @@ from Property import PROPERTY_CONFIG
 from multimodal_LLM import RECIPE_STAGE3, MultimodalModel
 from train_defaults import PROPERTY_DEFAULTS, VASKA_DEFAULTS
 
-from OOD.cluster_split import split_output_suffix
-from OOD.dataset_ood import TmQMgClusterSplitDataset
+from OOD.property.cluster_split import split_output_suffix
+from OOD.property.dataset_ood import TmQMgClusterSplitDataset
 
 DEFAULT_STAGE2_CKPT = "/data/jingyuan_data/3DTMC-LLM/Stage2"
 # Override with --split_csv pointing to your train/test CSV.

@@ -30,7 +30,7 @@ from utils import MultimodalCollator, MultimodalFullTrainer
 
 from NiComplex import NI_INSTRUCTION, NiComplexDDGDataset, load_merged_valid_nicomplex_records
 from multimodal_LLM import RECIPE_STAGE3, MultimodalModel
-from train_defaults import NICOMPLEX_DEFAULTS, VASKA_DEFAULTS
+from train_defaults import NICOMPLEX_OOD_DEFAULTS, VASKA_DEFAULTS
 
 from OOD.NiComplex.nicomplex_split import (
     EXPERIMENT_NAMES,
@@ -39,11 +39,11 @@ from OOD.NiComplex.nicomplex_split import (
     summarize_field,
 )
 
-DEFAULT_LMDB = "/data/jingyuan_data/NiComplex/data.lmdb"
-DEFAULT_OUTPUT_DIR = "/data/jingyuan_data/NiComplex_OOD_Models"
-DEFAULT_BATCH_SIZE = 16
-DEFAULT_EPOCHS = 1
-DEFAULT_SAVE_STEPS = 50
+DEFAULT_LMDB = NICOMPLEX_OOD_DEFAULTS["lmdb"][0]
+DEFAULT_OUTPUT_DIR = NICOMPLEX_OOD_DEFAULTS["output_dir"]
+DEFAULT_BATCH_SIZE = NICOMPLEX_OOD_DEFAULTS["batch_size"]
+DEFAULT_EPOCHS = NICOMPLEX_OOD_DEFAULTS["epochs"]
+DEFAULT_SAVE_STEPS = NICOMPLEX_OOD_DEFAULTS["save_steps"]
 
 
 def _train_one_experiment(args, experiment_name: str, all_valid: list, local_rank: int) -> None:
@@ -159,7 +159,7 @@ if __name__ == "__main__":
         "--3D_encoder_ckpt",
         dest="three_d_encoder_ckpt",
         type=str,
-        default=NICOMPLEX_DEFAULTS["3D_encoder_ckpt"],
+        default=NICOMPLEX_OOD_DEFAULTS["3D_encoder_ckpt"],
     )
     parser.add_argument("--lmdb", action="append", default=None, dest="lmdb_paths", metavar="PATH")
     parser.add_argument("--output_dir", type=str, default=DEFAULT_OUTPUT_DIR)
@@ -169,17 +169,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Sequentially train all three scaffold OOD experiments",
     )
-    parser.add_argument("--lora_r", type=int, default=NICOMPLEX_DEFAULTS["lora_r"])
-    parser.add_argument("--lora_alpha", type=int, default=NICOMPLEX_DEFAULTS["lora_alpha"])
-    parser.add_argument("--lora_target", type=str, default=NICOMPLEX_DEFAULTS["lora_target"], choices=["qv", "qkv", "all"])
+    parser.add_argument("--lora_r", type=int, default=NICOMPLEX_OOD_DEFAULTS["lora_r"])
+    parser.add_argument("--lora_alpha", type=int, default=NICOMPLEX_OOD_DEFAULTS["lora_alpha"])
+    parser.add_argument("--lora_target", type=str, default=NICOMPLEX_OOD_DEFAULTS["lora_target"], choices=["qv", "qkv", "all"])
     parser.add_argument(
         "--projection_init",
         type=str,
-        default=NICOMPLEX_DEFAULTS["projection_init"],
+        default=NICOMPLEX_OOD_DEFAULTS["projection_init"],
         choices=["pretrained", "from_scratch"],
     )
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
-    parser.add_argument("--lr", type=float, default=NICOMPLEX_DEFAULTS["lr"])
+    parser.add_argument("--lr", type=float, default=NICOMPLEX_OOD_DEFAULTS["lr"])
     parser.add_argument("--batch_size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--save_steps", type=int, default=DEFAULT_SAVE_STEPS)
     parser.add_argument("--local_rank", type=int, default=-1)

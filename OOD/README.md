@@ -1,10 +1,12 @@
 # OOD evaluation splits
 
-Supported OOD protocols (see `ood_splits.py`):
+Property OOD code lives under **`OOD/property/`** (`Property_OOD.py`, `cluster_split.py`, `dataset_ood.py`, `ood_splits.py`).
+
+Supported OOD protocols (see `property/ood_splits.py`):
 
 | Task | Split | Training | Inference |
 |------|-------|----------|-------------|
-| **Property** | User CSV: `CSD code` + `split` (or `train.csv` / `test.csv` dir) | `OOD/Property_OOD.py` | `inference.py stage3 --split_csv ...` |
+| **Property** | User CSV: `CSD code` + `split` (or `train.csv` / `test.csv` dir) | `OOD/property/Property_OOD.py` | `inference.py stage3 --split_csv ...` |
 | **Vaska** | 26 leave-one-ligand-out folds | `OOD/Vaska/Vaska_Ligand_OOD.py` | `inference.py stage3 --task vaska_barrier --holdout_ligand ...` |
 | **NiComplex** | Pybox / Biox / Biim scaffold holdouts | `OOD/NiComplex/NiComplex_OOD.py` | `inference.py stage3 --task nicomplex_ddg --ood_experiment ...` |
 

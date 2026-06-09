@@ -1139,7 +1139,7 @@ def _load_stage3_eval_model(args: argparse.Namespace):
 
 
 def _eval_tmqm_task(args: argparse.Namespace, task: str) -> dict:
-    from OOD.dataset_ood import TmQMgClusterSplitDataset
+    from OOD.property.dataset_ood import TmQMgClusterSplitDataset
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     model = _load_stage3_eval_model(args)

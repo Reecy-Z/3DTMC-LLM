@@ -16,7 +16,7 @@ from utils import (
     tokenize_generation_sample_object_ref,
 )
 
-from OOD.cluster_split import csd_from_lmdb_key, load_csd_codes_for_split, summarize_split_source
+from OOD.property.cluster_split import csd_from_lmdb_key, load_csd_codes_for_split, summarize_split_source
 
 
 class TmQMgClusterSplitDataset:

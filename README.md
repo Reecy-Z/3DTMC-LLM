@@ -6,6 +6,8 @@
 
 This repository implements a **3D encoder** fused with a **causal LLM** — by default **[Qwen/Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507)** — for generative tasks on transition metal complexes (TMCs). The stack is trained in stages: **3D encoder pretraining → Stage 1 (frozen LLM) → Stage 2 (LLM + LoRA + continued 3D alignment)**, then **downstream fine-tuning** on property prediction, barrier regression, and related tasks.
 
+Training and inference share a **task registry** (`task_registry.py`) and **dataset helpers** (`task_datasets.py`). Downstream work uses the unified **`Stage3.py`** trainer and **`inference.py`** evaluator instead of separate per-task scripts.
+
 ### Environment
 
 ```bash
@@ -28,23 +30,23 @@ Checkpoints and Stage 1 data for **3DTMC-LLM** are published on Hugging Face und
 |------|----------|
 | **Stage 2** (trained stack: LoRA adapter, tokenizer files, `3D_encoder.pt`, trainer state, etc.) | [Stage2](https://huggingface.co/Reecy/3DTMC-LLM/tree/main/Stage2) |
 | **3D encoder (pretrained)** | [3D_encoder_pretrain](https://huggingface.co/Reecy/3DTMC-LLM/tree/main/3D_encoder_pretrain) |
-| **Atom vocabulary for the 3D encoder** (`dict.txt` format) | [3D_encoder_dict.txt](https://huggingface.co/Reecy/3DTMC-LLM/blob/main/3D_encoder_dict.txt) |
+| **Atom vocabulary for the 3D encoder** (`dict.txt` format) | [3D_encoder_dict.txt](https://huggingface.co/Reecy/3DTMC-LLM/blob/main/3D_encoder_dict.txt) (also shipped as `3D_encoder_dict.txt` in this repo) |
 | **Stage 1 — TMC-Prop3D** (LMDB) | [TMC-Prop3D.lmdb](https://huggingface.co/Reecy/3DTMC-LLM/blob/main/TMC-Prop3D.lmdb) |
 
 **Building datasets / text corpora**
 
-- **`enrich_description.py`** — starting from an LMDB with **`description`** and **`smiles`**, calls an OpenAI-compatible LLM and writes polished text to **`enriched_description`**. Use this workflow to build a **TMC-Prop3D-Enriched** dataset (enriched descriptions in LMDB) for Stage 2 training.
-- **`generate_QA_pairs.py`** — loads knowledge-source files (e.g. PDF, TXT, Markdown), splits into chunks, and uses the Chat Completions API to generate **Q&A pairs** saved for Stage 2 training.
+- **`datasets_generation/enrich_description.py`** — starting from an LMDB with **`description`** and **`smiles`**, calls an OpenAI-compatible LLM and writes polished text to **`enriched_description`**. Use this workflow to build a **TMC-Prop3D-Enriched** dataset (enriched descriptions in LMDB) for Stage 2 training.
+- **`datasets_generation/generate_QA_pairs.py`** — loads knowledge-source files (e.g. PDF, TXT, Markdown), splits into chunks, and uses the Chat Completions API to generate **Q&A pairs** saved for Stage 2 training.
 
 ---
 
 ## 1. 3D encoder
 
-Downstream **Stage 1 / 2 / Property / NiComplex / Vaska** code expects **pretrained 3D encoder weights** and a **`dict.txt`** atom vocabulary.
+Downstream **Stage 1 / 2 / Stage 3** code expects **pretrained 3D encoder weights** and a **`dict.txt`** atom vocabulary.
 
 ### Option A — use our pretrained encoder
 
-Load the encoder from **[Reecy/3DTMC-LLM/3D_encoder_pretrain](https://huggingface.co/Reecy/3DTMC-LLM/tree/main/3D_encoder_pretrain)** and use atom vocabulary **[3D_encoder_dict.txt](https://huggingface.co/Reecy/3DTMC-LLM/blob/main/3D_encoder_dict.txt)** (as `dict.txt`).
+Load the encoder from **[Reecy/3DTMC-LLM/3D_encoder_pretrain](https://huggingface.co/Reecy/3DTMC-LLM/tree/main/3D_encoder_pretrain)** and use atom vocabulary **`3D_encoder_dict.txt`** (or the Hub copy linked above) as `dict.txt`.
 
 ### Option B — pretrain the 3D encoder yourself
 
@@ -76,15 +78,26 @@ Load the encoder from **[Reecy/3DTMC-LLM/3D_encoder_pretrain](https://huggingfac
 
 - Trains the **3D encoder + single-token projection** into the LLM embedding space; **LLM is frozen**.  
 - **Data:** tmQM-style **LMDB** with `atoms`, `coordinates`, `smiles`, `description`.  
-- **Run (example):**
+- **Default mode:** instruction + SMILES + 3D → `description`.
 
-  ```bash
-  CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Stage1.py \
-    --model_name Qwen/Qwen3-4B-Instruct-2507 \
-    --train_lmdb /path/train.lmdb /path/valid.lmdb --val_lmdb /path/valid.lmdb --output_dir ...
-  ```
+**Ablation modes** (`--ablation`):
 
-  Use the same **`dict.txt`** and **encoder checkpoint** paths as in `train_defaults.py` / your HF download.
+| `--ablation` | Prompt | Projection |
+|--------------|--------|------------|
+| `stage1` (default) | instruction + SMILES + 3D | single-token |
+| `3d_only` | instruction + 3D only | single-token |
+| `multi_token` | instruction + SMILES + 3D | learnable multi-token queries |
+
+**Run (example):**
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Stage1.py \
+  --model_name Qwen/Qwen3-4B-Instruct-2507 \
+  --train_lmdb /path/train.lmdb --val_lmdb /path/valid.lmdb \
+  --3D_encoder_ckpt /path/to/encoder.pt \
+  --3D_encoder_dict 3D_encoder_dict.txt \
+  --output_dir /path/to/stage1_out
+```
 
 Defaults are centralized in **`train_defaults.py`** (`STAGE1_DEFAULTS`).
 
@@ -95,62 +108,166 @@ Defaults are centralized in **`train_defaults.py`** (`STAGE1_DEFAULTS`).
 **Script:** `Stage2.py`  
 
 - Continues from a **Stage 1 checkpoint**: **LoRA** on the LLM, **3D encoder + single-token projection** trainable.  
-- **Mixed data:** (1) **LMDB** with `enriched_description`; (2) **JSON Q&A**.  
+- **Default data:** (1) **LMDB** with `enriched_description`; (2) **JSON Q&A**.  
+
+**Description ablations** (`--ablation`):
+
+| `--ablation` | Data | Prompt / 3D recipe |
+|--------------|------|---------------------|
+| `stage2` (default) | enriched LMDB + JSON QA | instruction + SMILES + 3D |
+| `freeze_3d` | enriched LMDB + JSON QA | frozen 3D encoder + projection |
+| `random_3d` | enriched LMDB + JSON QA | random structure-slot embedding |
+| `multi_token` | enriched LMDB | multi-token query projection |
+| `3d_only` | enriched LMDB | 3D slot only (no SMILES) |
 
 **Run (example):**
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Stage2.py \
-  --model_name Qwen/Qwen3-4B-Instruct-2507 --Stage1_ckpt /path/to/stage1_checkpoint \
-  --train_lmdb ... --val_lmdb ... --json_qa ... --output_dir ...
+  --model_name Qwen/Qwen3-4B-Instruct-2507 \
+  --Stage1_ckpt /path/to/stage1_checkpoint \
+  --train_lmdb /path/train.lmdb --val_lmdb /path/valid.lmdb \
+  --json_qa /path/to/qa.json \
+  --output_dir /path/to/stage2_out
 ```
 
 Pretrained **Stage 2** weights are provided under **[Reecy/3DTMC-LLM/Stage2](https://huggingface.co/Reecy/3DTMC-LLM/tree/main/Stage2)** (see **Models and Datasets** above).
 
-Defaults: **`train_defaults.py`** (`STAGE2_DEFAULTS`).
+Defaults: **`train_defaults.py`** (`STAGE2_DEFAULTS`, `DESCRIPTION_DEFAULTS`).
 
 ---
 
 ## 4. Stage 3 (Downstream tasks)
 
-**`Stage3/Property.py`**, **`Stage3/NiComplex.py`**, and **`Stage3/Vaska_Complex.py`** initialized from a **Stage 2 `Stage2_ckpt`** (HF adapter + encoder weights + single-token projection weights).
+**Script:** `Stage3.py` — unified trainer for all Stage 3 regression tasks.
 
-For **Vaska_Complex**, we provide a **ready-made LMDB** (`data.lmdb`) on the Hub at **[Reecy/3DTMC-LLM/vaskas-space](https://huggingface.co/Reecy/3DTMC-LLM/tree/main/vaskas-space)** so you can run the task.
+Initialize from a **Stage 2 checkpoint** (`Stage2_ckpt`: HF adapter + encoder weights + single-token projection weights).
 
-For **NiComplex** data preparation, we provide **`datasets_generation/build_ni_complex.py`**: it uses **MetalloGen** to **assemble a five-coordinate square-pyramidal Ni complex** from a **bidentate nitrogen-donor ligand** (`Ligand*_N*.xyz`, with donor indices in the filename) and three **substrate** fragments (`R1_stay*.xyz`, `R2_stay*.xyz`, `R2_leave*.xyz`) in a single case directory, and writes **`complex_Ni.xyz`** there. Requires Gaussian/xtb setup as in the script header (e.g. `xtbbin`). Example:
+| `--task` | Target | Split | Default data |
+|----------|--------|-------|--------------|
+| `dipole_moment` | dipole (Debye) | fixed train/val LMDB | [tmQMg](https://github.com/hkneiding/tmqmg) |
+| `polarisability` | polarisability (Bohr³) | fixed train/val LMDB | tmQMg |
+| `homo_lumo_gap` | HOMO–LUMO gap (Ha) | fixed train/val LMDB | tmQMg |
+| `vaska_barrier` | H₂ activation barrier (kcal/mol) | random 80/10/10 (`--split_seed`) | [vaskas-space](https://github.com/pascalfriederich/vaskas-space) — prebuilt LMDB: **[`vaskas-space/data.lmdb`](https://huggingface.co/Reecy/3DTMC-LLM/tree/main/vaskas-space)** |
+| `nicomplex_ddg` | enantioselectivity ΔΔG (kcal/mol) | random 80/10/10 (`--split_seed`) | [Enantioselective-Cross-Coupling-Prediction](https://github.com/TheLiaoGroup/Enantioselective-Cross-Coupling-Prediction) |
+
+**Training modes** (`--mode`; `--ablation` is a deprecated alias):
+
+| `--mode` | Description |
+|----------|-------------|
+| `single_token` (default) | full SFT: instruction + SMILES + 3D |
+| `freeze_3d` | frozen 3D encoder + projection; train LoRA only |
+| `random_3d` | random structure-slot embedding; train LoRA only |
+| `multi_token` | learnable multi-token query projection |
+| `3d_only` | instruction + 3D only (no SMILES in prompt) |
+
+**Run (examples):**
+
+```bash
+# TmQM property (default task: homo_lumo_gap)
+CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Stage3.py \
+  --task homo_lumo_gap \
+  --Stage2_ckpt /path/to/stage2_checkpoint \
+  --train_lmdb /path/train.lmdb --val_lmdb /path/valid.lmdb
+
+# Vaska barrier with a fixed random split
+CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Stage3.py \
+  --task vaska_barrier \
+  --lmdb /path/to/vaskas-space/data.lmdb \
+  --split_seed 43
+
+# NiComplex ΔΔG
+CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Stage3.py \
+  --task nicomplex_ddg \
+  --lmdb /path/to/NiComplex/data.lmdb \
+  --split_seed 38
+
+# Property ablation: frozen 3D encoder
+CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Stage3.py \
+  --task dipole_moment --mode freeze_3d \
+  --3D_encoder_ckpt /path/to/encoder.pt
+```
+
+**NiComplex data preparation:** **`datasets_generation/build_ni_complex.py`** uses **MetalloGen** to assemble a five-coordinate square-pyramidal Ni complex from ligand/substrate XYZ fragments and writes **`complex_Ni.xyz`**. Requires Gaussian/xtb setup as in the script header.
 
 ```bash
 python datasets_generation/build_ni_complex.py datasets_generation/NiComplex_example
 ```
 
-| Task | Script | Dataset / reference |
-|------|--------|---------------------|
-| Quantum properties (dipole, polarisability, HOMO–LUMO, …) | `Stage3/Property.py` | **[tmQMg](https://github.com/hkneiding/tmqmg)** — graph/property release and analysis (see also [uiocompcat/tmQMg](https://github.com/uiocompcat/tmQMg) for the dataset family). |
-| H₂ activation energy barrier (Vaska-type Ir complexes) | `Stage3/Vaska_Complex.py` | Original release: **[vaskas-space](https://github.com/pascalfriederich/vaskas-space)**. Prebuilt LMDB for this workflow: **[`vaskas-space/data.lmdb`](https://huggingface.co/Reecy/3DTMC-LLM/tree/main/vaskas-space)** on Hugging Face. |
-| Ni-catalyzed enantioselective coupling (ΔΔG / related targets) | `Stage3/NiComplex.py` | **[Enantioselective-Cross-Coupling-Prediction](https://github.com/TheLiaoGroup/Enantioselective-Cross-Coupling-Prediction)** |
-
-To **test Vaska barrier** with **10 different random 80/10/10 splits**, run from the repo root:
-
-```bash
-bash run_vaska_ten_splits.sh
-```
-
-The script trains **Stage3/Vaska_Complex.py** (2 GPUs) for each seed, runs **`inference_Vaska_Complex.py`**, and writes one JSON per seed under **`Vaska_Complex_Results/`** (e.g. `pred_vaska_barrier_seed_1.json`). Seeds whose prediction file already exists and is non-empty are **skipped** so you can resume. Paths and hyperparameters come from **`train_defaults.py`** (`VASKA_DEFAULTS`, including LMDB and `Stage2_ckpt`); adjust there or pass overrides if your fork uses different locations. At the end it runs **`plot_vaska_barrier.py`** on the collected JSON files.
-
-For a **single** split without the loop, call **`Stage3/Vaska_Complex.py`** directly, e.g.:
-
-```bash
-CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Stage3/Vaska_Complex.py --split_seed 1
-```
+**Backward compatibility:** `Stage3/Property.py`, `Stage3/NiComplex.py`, and `Stage3/Vaska_Complex.py` are thin wrappers that delegate to `Stage3.py`.
 
 Hyperparameters and paths: **`train_defaults.py`** (`PROPERTY_DEFAULTS`, `NICOMPLEX_DEFAULTS`, `VASKA_DEFAULTS`).
 
-> [!CAUTION]
-> **Paper correction (Vaska complex, 10 random splits).** In the manuscript, **Figure 5B** and **Figures S8–S16** summarize Vaska-type barrier prediction over **ten** random train/val/test splits. Those results were affected by an evaluation bug: at test time, **every run reused the test set from the first split** instead of the test fold matched to each seed’s split. That **data leakage** inflated the reported metrics. We **fixed the code**, **re-ran** the ten-seed pipeline, and ship the corrected outputs under **`Vaska_Complex_Results/`** (JSONs and plots from `run_vaska_ten_splits.sh` / `plot_vaska_barrier.py`). On the corrected evaluation, aggregated across 10 seeds: **MAE = 0.7186 ± 0.0323 kcal/mol**, **R² = 0.9429 ± 0.0074**, the best **MAE** and **R2** is **0.6781** and **0.9565**.
+---
+
+## 5. Inference
+
+**Script:** `inference.py` — unified evaluation for description ablations and Stage 3 regression (MAE / R²).
+
+### Description generation (Stage 2 ablations)
+
+```bash
+python inference.py description \
+  --mode stage2 \
+  --ckpt /path/to/stage2_checkpoint \
+  --test_lmdb /path/to/test.lmdb \
+  --save_json description_preds.json
+```
+
+Supported `--mode` values: `stage2`, `freeze_3d`, `random_3d`, `3d_only`, `multi_token`.
+
+### Stage 3 property / downstream evaluation
+
+```bash
+# TmQM property on a held-out LMDB
+python inference.py stage3 \
+  --task dipole_moment \
+  --Stage3_ckpt /path/to/checkpoint \
+  --test_lmdb /path/to/test.lmdb
+
+# Vaska barrier (single random split)
+python inference.py stage3 \
+  --task vaska_barrier \
+  --Stage3_ckpt /path/to/checkpoint \
+  --lmdb /path/to/vaskas-space/data.lmdb \
+  --split_seed 43
+```
+
+### OOD evaluation
+
+Out-of-distribution splits for property, Vaska ligand, and NiComplex scaffold holdouts are documented in **`OOD/README.md`**.
+
+```bash
+# Property OOD via user CSV split
+python inference.py stage3 \
+  --task dipole_moment \
+  --Stage3_ckpt /path/to/checkpoint \
+  --split_csv /path/to/split.csv \
+  --split_name test \
+  --save_json ood_preds.json
+
+# Vaska: leave-one-ligand-out
+python inference.py stage3 \
+  --task vaska_barrier \
+  --holdout_ligand dft-co \
+  --lmdb /path/to/vaskas-space/data.lmdb \
+  --Stage3_ckpt /path/to/ligand_dft-co \
+  --save_json ood_preds.json
+
+# NiComplex: scaffold holdout
+python inference.py stage3 \
+  --task nicomplex_ddg \
+  --ood_experiment train_rest_test_Pybox \
+  --lmdb /path/to/NiComplex/data.lmdb \
+  --Stage3_ckpt /path/to/exp_train_rest_test_Pybox \
+  --save_json ood_preds.json
+```
+
+OOD training entry points: **`OOD/property/Property_OOD.py`**, **`OOD/Vaska/Vaska_Ligand_OOD.py`**, **`OOD/NiComplex/NiComplex_OOD.py`**.
 
 ---
 
-## 5. Interactive inference demo
+## 6. Interactive inference demo
 
 **`inference_demo.py`** — single-structure **SMILES + XYZ + free-form instruction**. Example:
 
@@ -165,7 +282,7 @@ CUDA_VISIBLE_DEVICES=0 python inference_demo.py \
 
 ---
 
-## 6. Building TMC structures and SMILES
+## 7. Building TMC structures and SMILES
 
 | Goal | Resource |
 |------|----------|
@@ -174,20 +291,26 @@ CUDA_VISIBLE_DEVICES=0 python inference_demo.py \
 
 ---
 
-## 7. Repository layout (core)
+## 8. Repository layout (core)
 
-| File | Role |
-|------|------|
+| File / directory | Role |
+|------------------|------|
 | `3D_encoder_trainer.py` | 3D encoder LMDB pretraining with `Trainer` + DeepSpeed |
-| `multimodal_LLM.py` | Geometry + Qwen stack; defines single-token-projected 3D tokens + LLM (Stage 1 / 2 / 3 recipes) |
+| `multimodal_LLM.py` | Geometry + Qwen stack; single-token / multi-token / ablation model recipes |
 | `utils.py` | LMDB helpers, 3D batching, single-token embed fusion, collators |
-| `Stage1.py` / `Stage2.py` | Instruction-tuning stages |
-| `Stage3/Property.py` / `Stage3/NiComplex.py` / `Stage3/Vaska_Complex.py` | Downstream SFT |
-| `inference_demo.py` | Generic single-token + 3D generation demo |
+| `task_registry.py` | Task definitions, instructions, split strategies (single source of truth) |
+| `task_datasets.py` | Dataset classes and prompt assembly wired to the registry |
+| `Stage1.py` / `Stage2.py` | Instruction-tuning stages (+ ablation modes) |
+| `Stage3.py` | Unified Stage 3 trainer (`--task`, `--mode`) |
+| `Stage3/Property.py`, `Stage3/NiComplex.py`, `Stage3/Vaska_Complex.py` | Backward-compatible wrappers around `Stage3.py` |
+| `inference.py` | Unified batch inference and regression evaluation |
+| `inference_demo.py` | Generic single-structure generation demo |
+| `OOD/` | OOD split utilities and task-specific OOD training scripts |
+| `OOD/property/` | Property OOD training, CSV cluster splits, and dataset helpers |
+| `OOD/Vaska/`, `OOD/NiComplex/` | Vaska ligand and NiComplex scaffold OOD training |
 | `train_defaults.py` | Default paths and hyperparameters |
-| `datasets_generation/enrich_description.py` | LMDB → LLM polish → `enriched_description` (TMC-Prop3D-Enriched build) |
-| `datasets_generation/generate_QA_pairs.py` | Knowledge sources → chunked Q&A JSON |
-| `datasets_generation/build_ni_complex.py` | MetalloGen: assemble a five-coordinate Ni complex XYZ|
+| `3D_encoder_dict.txt` | Atom vocabulary for the 3D encoder |
+| `datasets_generation/` | LMDB enrichment, Q&A generation, Ni complex builder |
 | `requirements.txt` | Python dependencies (after PyTorch) |
 
 ---

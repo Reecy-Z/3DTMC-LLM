@@ -77,6 +77,15 @@ NICOMPLEX_DEFAULTS = {
     "batch_size": 32,
 }
 
+NICOMPLEX_OOD_DEFAULTS = {
+    **NICOMPLEX_DEFAULTS,
+    "epochs": 1,
+    "batch_size": 16,
+    "save_steps": 50,
+    "output_dir": "/data/jingyuan_data/NiComplex_OOD_Models",
+    "lmdb": ["/data/jingyuan_data/NiComplex/data.lmdb"],
+}
+
 VASKA_DEFAULTS = {
     "model_name": "/path/to/HF_models/Qwen3-4B-Instruct-2507",
     "3D_encoder_dict": "/path/to/3D_encoder_dict.txt",
