@@ -16,3 +16,6 @@ venv/
 wandb/
 .vendor/
 docs/
+run_nicomplex_ood_train_infer.sh
+run_ood_property_train_infer.sh
+run_vaska_ligand_ood_train_infer.sh
