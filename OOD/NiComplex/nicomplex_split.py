@@ -1,4 +1,4 @@
-"""OOD train/test splits for NiComplex ΔΔG (ligand scaffold LOLO + reaction-type OOD)."""
+"""NiComplex ΔΔG OOD: ligand-scaffold leave-one-out (Pybox / Biox / Biim only)."""
 from __future__ import annotations
 
 import re
@@ -7,7 +7,6 @@ from typing import Dict, List, Set, Tuple
 
 ALL_LIGAND_SCAFFOLDS = frozenset({"Box", "Biox", "Pybox", "Pyox", "Biim", "Diamine"})
 
-# Five experiments requested: 3 ligand-scaffold holdouts + 2 reaction-type OOD splits.
 OOD_EXPERIMENTS = (
     {
         "name": "train_rest_test_Pybox",
@@ -30,37 +29,10 @@ OOD_EXPERIMENTS = (
         "test_types": {"Biim"},
         "description": "Leave-one-ligand-scaffold-out: test Biim",
     },
-    {
-        "name": "train_rest_test_Box",
-        "split_col": "L_Scaffold",
-        "train_types": ALL_LIGAND_SCAFFOLDS - {"Box"},
-        "test_types": {"Box"},
-        "description": "Leave-one-ligand-scaffold-out: test Box",
-    },
-    {
-        "name": "train_rest_test_Pyox",
-        "split_col": "L_Scaffold",
-        "train_types": ALL_LIGAND_SCAFFOLDS - {"Pyox"},
-        "test_types": {"Pyox"},
-        "description": "Leave-one-ligand-scaffold-out: test Pyox",
-    },
-    {
-        "name": "train_NiH+Csp2_test_Csp3",
-        "split_col": "R_Type",
-        "train_types": {"NiH", "C(sp3)-C(sp2)"},
-        "test_types": {"C(sp3)-C(sp3)"},
-        "description": "Train NiH + C(sp3)-C(sp2); test C(sp3)-C(sp3)",
-    },
-    {
-        "name": "train_NiH+Csp3_test_Csp2",
-        "split_col": "R_Type",
-        "train_types": {"NiH", "C(sp3)-C(sp3)"},
-        "test_types": {"C(sp3)-C(sp2)"},
-        "description": "Train NiH + C(sp3)-C(sp3); test C(sp3)-C(sp2)",
-    },
 )
 
 EXPERIMENT_NAMES = tuple(spec["name"] for spec in OOD_EXPERIMENTS)
+SCAFFOLD_OOD_EXPERIMENTS = EXPERIMENT_NAMES
 
 
 def experiment_dirname(name: str) -> str:

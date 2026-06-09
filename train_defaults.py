@@ -4,7 +4,7 @@
 from pickle import NONE
 
 
-UNICORE_ROOT = "/home/zhujingyuan/Uni-Core"
+UNICORE_ROOT = "/home/featurize/work/Uni-Core"
 
 STAGE1_DEFAULTS = {
     "model_name": "/path/to/HF_models/Qwen3-4B-Instruct-2507",
@@ -15,6 +15,10 @@ STAGE1_DEFAULTS = {
     ],
     "val_lmdb": "/path/to/valid/tmc.lmdb",
     "output_dir": "/path/to/STAGE1",
+    "epochs": 3,
+    "lr": 2e-4,
+    "batch_size": 4,
+    "save_steps": 1,
 }
 
 STAGE2_DEFAULTS = {
@@ -73,34 +77,27 @@ NICOMPLEX_DEFAULTS = {
     "batch_size": 32,
 }
 
-# VASKA_DEFAULTS = {
-#     "model_name": "/path/to/HF_models/Qwen3-4B-Instruct-2507",
-#     "3D_encoder_dict": "/path/to/3D_encoder_dict.txt",
-#     "Stage2_ckpt": "/path/to/Stage2",
-#     "lmdb": "/path/to/vaskas-space/data.lmdb",
-#     "output_dir": "VASKA",
-#     "split_seed": 43,
-#     "lora_r": 32,
-#     "lora_alpha": 64,
-#     "lora_target": "all",
-#     "epochs": 20,
-#     "lr": 3e-5,
-#     "batch_size": 32,
-# }
-
 VASKA_DEFAULTS = {
-    "model_name": "/data/jingyuan_data/HF_models/Qwen3-4B-Instruct-2507",
-    "3D_encoder_dict": "/data/jingyuan_data/3DTMC-LLM/3D_encoder_dict.txt",
-    "Stage2_ckpt": "/data/jingyuan_data/3DTMC-LLM/Stage2",
+    "model_name": "/path/to/HF_models/Qwen3-4B-Instruct-2507",
+    "3D_encoder_dict": "/path/to/3D_encoder_dict.txt",
+    "Stage2_ckpt": "/path/to/Stage2",
     "3D_encoder_ckpt": None,
-    "lmdb": "/data/jingyuan_data/vaskas-space/data.lmdb",
-    "output_dir": "/data/jingyuan_data/Vaska_Models",
-    "split_seed": 38,
+    "lmdb": "/path/to/vaskas-space/data.lmdb",
+    "output_dir": "VASKA",
+    "split_seed": 43,
     "lora_r": 32,
     "lora_alpha": 64,
     "lora_target": "all",
-    "projection_init": "from_scratch",
+    "projection_init": "pretrained",
     "epochs": 20,
     "lr": 3e-5,
     "batch_size": 32,
+}
+
+DESCRIPTION_DEFAULTS = {
+    **STAGE2_DEFAULTS,
+    "model_name": VASKA_DEFAULTS["model_name"],
+    "3D_encoder_dict": VASKA_DEFAULTS["3D_encoder_dict"],
+    "random_3d_seed": 42,
+    "test_lmdb": "/home/featurize/TMC-Prop3D-Enriched/test/tmc.lmdb",
 }

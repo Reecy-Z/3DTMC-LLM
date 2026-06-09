@@ -1,49 +1,57 @@
-# OOD: cluster-based train / test split (k150 far-from-train)
+# OOD evaluation splits
 
-Same **Stage3 Property** stack (Uni-Mol [CLS] → `single_token_projection` → Qwen3, SMILES+3D prompt) as `Stage3/Property.py`.  
-The only change is **which samples** are used. LMDB keys must be **CSD codes** (e.g. `ABAFOZ`).
+Supported OOD protocols (see `ood_splits.py`):
 
-**Split sources** (`--split_csv`):
+| Task | Split | Training | Inference |
+|------|-------|----------|-------------|
+| **Property** | User CSV: `CSD code` + `split` (or `train.csv` / `test.csv` dir) | `OOD/Property_OOD.py` | `inference.py stage3 --split_csv ...` |
+| **Vaska** | 26 leave-one-ligand-out folds | `OOD/Vaska/Vaska_Ligand_OOD.py` | `inference.py stage3 --task vaska_barrier --holdout_ligand ...` |
+| **NiComplex** | Pybox / Biox / Biim scaffold holdouts | `OOD/NiComplex/NiComplex_OOD.py` | `inference.py stage3 --task nicomplex_ddg --ood_experiment ...` |
 
-1. **Single CSV** (default): `/home/zhujingyuan/TMC/tmQMg/cluster_split_k150_far_from_train.csv` with `CSD code` + `split` = `train` | `test`.
-2. **Directory**: e.g. `split_k200_far_from_train/` with `train.csv` and `test.csv` (`CSD code` column).
+## Property (CSV split)
 
-## Files
-
-| File | Role |
-|------|------|
-| `cluster_split.py` | Load CSV, map CSD → split |
-| `dataset_ood.py` | `TmQMgClusterSplitDataset` |
-| `Property_OOD.py` | Train on `train`, eval on `test` |
-| `inference_property_ood.py` | Test-split MAE / R² |
-
-## Train
+Provide `--split_csv` pointing to your train/test definition:
 
 ```bash
-deepspeed --num_gpus=2 OOD/Property_OOD.py --property dipole_moment
+python inference.py stage3 \
+  --task dipole_moment \
+  --Stage3_ckpt /path/to/checkpoint \
+  --split_csv /path/to/your_split.csv \
+  --split_name test \
+  --save_json preds.json
 ```
 
-Defaults (override only if needed): `Stage2_ckpt=/data/jingyuan_data/3DTMC-LLM/Stage2`, `split_csv=cluster_split_k150_far_from_train.csv`, `epochs=10`, `save_steps=1000`.
+CSV format: columns `CSD code` (or `csd_code`) and `split` (`train` / `test`).  
+Alternatively, a directory with `train.csv` and `test.csv` (CSD code lists only).
 
-Output: `/data/jingyuan_data/OOD_Property_<property>_<split_tag>_ckpt`  
-(e.g. `..._cluster_split_k150_far_from_train_ckpt` for the default split CSV).
+Train + infer all three properties: `./run_ood_property_train_infer.sh` (set `SPLIT_SOURCE` to your CSV).
 
-**All properties train + infer:** `./run_ood_property_train_infer.sh`
-
-## Inference (cluster test split)
+## Vaska (26 ligand OOD)
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python -u OOD/inference_property_ood.py \
-  --Stage3_ckpt /data/jingyuan_data/OOD_Property_dipole_moment_cluster_split_k150_far_from_train_ckpt/checkpoint-3000 \
-  --property dipole_moment \
-  --save_json /path/to/ood_test_preds.json
+python inference.py stage3 \
+  --task vaska_barrier \
+  --holdout_ligand dft-co \
+  --lmdb /data/jingyuan_data/vaskas-space/data.lmdb \
+  --Stage3_ckpt /path/to/ligand_dft-co \
+  --save_json ood_preds.json
 ```
 
-## Defaults
+All 26 folds: `--run_all_ood` (requires `--save_json` base name; writes per-ligand JSON).
 
-- **Stage2_ckpt**: `/data/jingyuan_data/3DTMC-LLM/Stage2`
-- **Split (default)**: `/home/zhujingyuan/TMC/tmQMg/cluster_split_k150_far_from_train.csv`
-- **epochs / save_steps**: `10` / `1000`
-- **LMDBs** (both scanned, filtered by split):  
-  - `/data/jingyuan_data/tmqmg/stage3/train/tmqmg_atom_only_new.lmdb`  
-  - `/data/jingyuan_data/tmqmg/stage3/test/tmqmg_atom_only_new.lmdb`
+Shell: `./run_vaska_ligand_ood_train_infer.sh`
+
+## NiComplex (Pybox / Biox / Biim)
+
+```bash
+python inference.py stage3 \
+  --task nicomplex_ddg \
+  --ood_experiment train_rest_test_Pybox \
+  --lmdb /data/jingyuan_data/NiComplex/data.lmdb \
+  --Stage3_ckpt /path/to/exp_train_rest_test_Pybox \
+  --save_json ood_preds.json
+```
+
+All three scaffold experiments: `--run_all_ood`.
+
+Shell: `./run_nicomplex_ood_train_infer.sh`

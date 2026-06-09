@@ -17,6 +17,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from scipy.spatial import distance_matrix
+from safetensors.torch import load_file, save_file
 from transformers import Trainer
 from tqdm import tqdm
 from train_defaults import UNICORE_ROOT
@@ -433,6 +434,133 @@ class MultimodalFullTrainer(Trainer):
                 f,
                 indent=2,
             )
+
+
+DESCRIPTION_SAVE_KWARGS = {"save_only_model": True}
+
+
+class InferenceOnlyCheckpointMixin:
+    """Save LoRA / projection / 3D encoder / tokenizer only; no DeepSpeed trainer resume state."""
+
+    def _save_checkpoint(self, model, trial=None, **kwargs):
+        from transformers.trainer import rotate_checkpoints
+        from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
+
+        checkpoint_folder = f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}"
+        run_dir = self._get_output_dir(trial=trial)
+        output_dir = os.path.join(run_dir, checkpoint_folder)
+        self.save_model(output_dir, _internal_call=True)
+        if self.args.should_save:
+            rotate_checkpoints(
+                output_dir=run_dir,
+                save_total_limit=self.args.save_total_limit,
+                best_model_checkpoint=self.state.best_model_checkpoint,
+                use_mtime=True,
+            )
+
+
+def require_existing_model_path(path, flag_name):
+    from train_defaults import VASKA_DEFAULTS
+
+    if not path or "/path/to/" in path or not os.path.isdir(path):
+        raise FileNotFoundError(
+            f"{flag_name} must be a local directory with the HF model, got {path!r}. "
+            f"Example: --model_name {VASKA_DEFAULTS['model_name']}"
+        )
+
+
+def resolve_three_d_encoder_ckpt(three_d_encoder_ckpt, stage2_ckpt_dir):
+    if three_d_encoder_ckpt:
+        return three_d_encoder_ckpt
+    if stage2_ckpt_dir:
+        path = os.path.join(stage2_ckpt_dir, THREE_D_ENCODER_STATE_PT)
+        if os.path.isfile(path) or os.path.isdir(path):
+            return path
+        raise FileNotFoundError(
+            f"--Stage2_ckpt={stage2_ckpt_dir!r} has no {THREE_D_ENCODER_STATE_PT}; "
+            "pass --3D_encoder_ckpt explicitly."
+        )
+    raise FileNotFoundError(
+        "3D encoder checkpoint required: set --3D_encoder_ckpt or --Stage2_ckpt "
+        f"(directory containing {THREE_D_ENCODER_STATE_PT})."
+    )
+
+
+class MixedCollator:
+    """Collate mixed batches: LMDB (3D) + JSON (text-only)."""
+
+    def __init__(self, tokenizer):
+        self.pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
+
+    def __call__(self, batch):
+        before_3d_ids = [b["before_3d_ids"] for b in batch]
+        after_3d_ids = [b["after_3d_ids"] if b["after_3d_ids"] else [] for b in batch]
+        response_ids = [b["response_ids"] for b in batch]
+        list_atoms = [b["atoms"] for b in batch]
+        list_coordinates = [b["coordinates"] for b in batch]
+        sample_types = [b["sample_type"] for b in batch]
+        sample_indices = [b.get("sample_idx", -1) for b in batch]
+        before_3d_padded, before_3d_mask = _pad_ids(before_3d_ids, self.pad_id)
+        after_3d_padded, after_3d_mask = _pad_ids(after_3d_ids, self.pad_id)
+        response_padded, response_mask = _pad_ids(response_ids, self.pad_id)
+        return {
+            "before_3d_ids": before_3d_padded,
+            "before_3d_mask": before_3d_mask,
+            "after_3d_ids": after_3d_padded,
+            "after_3d_mask": after_3d_mask,
+            "response_ids": response_padded,
+            "response_mask": response_mask,
+            "list_atoms": list_atoms,
+            "list_coordinates": list_coordinates,
+            "sample_types": sample_types,
+            "sample_indices": sample_indices,
+            "labels": response_padded,
+        }
+
+
+class DescriptionTrainer(InferenceOnlyCheckpointMixin, Trainer):
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        outputs = model(**inputs)
+        return (outputs.loss, outputs) if return_outputs else outputs.loss
+
+    def save_model(self, output_dir=None, _internal_call=False):
+        if output_dir is None:
+            output_dir = self.args.output_dir
+        if not self.args.should_save:
+            return
+        os.makedirs(output_dir, exist_ok=True)
+        model = unwrap_hf_model(self.model)
+        model.llm.save_pretrained(output_dir)
+        model.tokenizer.save_pretrained(output_dir)
+        if getattr(model, "single_token_projection_layer", None) is not None:
+            proj_state = {
+                f"single_token_projection.{k}": v.cpu()
+                for k, v in model.single_token_projection_layer.state_dict().items()
+            }
+            save_file(proj_state, os.path.join(output_dir, SINGLE_TOKEN_PROJECTION_SAFETENSORS))
+        if getattr(model, "unimol", None) is not None:
+            torch.save({"model": model.unimol.state_dict()}, os.path.join(output_dir, THREE_D_ENCODER_STATE_PT))
+        with open(os.path.join(output_dir, "multimodal_config.json"), "w", encoding="utf-8") as f:
+            json.dump({"atom_dim": ATOM_DIM, "single_token_only": True}, f, indent=2)
+
+    def _load_best_model(self):
+        ckpt_dir = self.state.best_model_checkpoint
+        if ckpt_dir is None:
+            return
+        model = unwrap_hf_model(self.model)
+        model.llm.load_adapter(ckpt_dir, "default")
+        st_path = os.path.join(ckpt_dir, SINGLE_TOKEN_PROJECTION_SAFETENSORS)
+        if os.path.isfile(st_path) and getattr(model, "single_token_projection_layer", None) is not None:
+            raw = load_file(st_path, device="cpu")
+            sd = strip_single_token_projection_state_dict(dict(raw))
+            if sd:
+                model.single_token_projection_layer.load_state_dict(sd, strict=False)
+        unimol_pt = os.path.join(ckpt_dir, THREE_D_ENCODER_STATE_PT)
+        if os.path.isfile(unimol_pt) and getattr(model, "unimol", None) is not None:
+            state = torch.load(unimol_pt, map_location="cpu", weights_only=False)
+            if "model" in state:
+                state = state["model"]
+            model.unimol.load_state_dict(state, strict=False)
 
 
 ensure_unimol_import_paths()

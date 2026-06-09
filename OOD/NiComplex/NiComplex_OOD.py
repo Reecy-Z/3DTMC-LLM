@@ -146,7 +146,7 @@ def _train_one_experiment(args, experiment_name: str, all_valid: list, local_ran
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="NiComplex OOD: scaffold / reaction-type splits")
+    parser = argparse.ArgumentParser(description="NiComplex OOD: Pybox / Biox / Biim scaffold holdouts")
     parser.add_argument("--model_name", type=str, default=VASKA_DEFAULTS["model_name"])
     parser.add_argument(
         "--3D_encoder_dict",
@@ -167,7 +167,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--run_all_experiments",
         action="store_true",
-        help="Sequentially train all five OOD experiments",
+        help="Sequentially train all three scaffold OOD experiments",
     )
     parser.add_argument("--lora_r", type=int, default=NICOMPLEX_DEFAULTS["lora_r"])
     parser.add_argument("--lora_alpha", type=int, default=NICOMPLEX_DEFAULTS["lora_alpha"])

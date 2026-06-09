@@ -8,7 +8,7 @@ from typing import Optional, Set
 import lmdb
 import numpy as np
 
-from Property import PROPERTY_CONFIG
+from task_datasets import PROPERTY_CONFIG
 from utils import (
     _atoms_coords_remove_h_center,
     _lmdb_env_kwargs,

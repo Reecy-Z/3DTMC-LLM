@@ -31,7 +31,8 @@ from OOD.cluster_split import split_output_suffix
 from OOD.dataset_ood import TmQMgClusterSplitDataset
 
 DEFAULT_STAGE2_CKPT = "/data/jingyuan_data/3DTMC-LLM/Stage2"
-DEFAULT_SPLIT_CSV = "/home/zhujingyuan/TMC/tmQMg/cluster_split_k150_far_from_train.csv"
+# Override with --split_csv pointing to your train/test CSV.
+DEFAULT_SPLIT_CSV = "/path/to/your_property_split.csv"
 DEFAULT_EPOCHS = 10
 DEFAULT_SAVE_STEPS = 1000
 DEFAULT_LMDB_PATHS = [
