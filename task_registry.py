@@ -386,8 +386,8 @@ def default_output_dir(task: TaskSpec | str, mode: Mode, *, base: Optional[str] 
     if base:
         return base
     if mode in ("freeze_3d", "random_3d", "multi_token", "3d_only"):
-        return f"/data/jingyuan_data/Stage3_{suffix}_{mode}_ckpt"
-    return f"/data/jingyuan_data/Stage3_{suffix}_ckpt"
+        return f"/path/to/Stage3_{suffix}_{mode}_ckpt"
+    return f"/path/to/Stage3_{suffix}_ckpt"
 
 
 def wandb_project(task: TaskSpec | str, mode: Mode) -> str:

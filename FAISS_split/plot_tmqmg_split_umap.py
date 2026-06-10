@@ -775,7 +775,7 @@ def main() -> None:
     panel_title = panel_title_raw(meta) if args.raw else panel_title_cluster(meta)
     suptitle = suptitle_for(meta, raw=args.raw)
     npz_path = args.fingerprints_npz or Path(
-        meta.get("fingerprints_npz", "/data/jingyuan_data/tmQMg_complex_fingerprints.npz")
+        meta.get("fingerprints_npz", "/path/to/tmQMg_complex_fingerprints.npz")
     )
     w_bits = float(meta.get("w_bits", 0.7))
     w_meta = float(meta.get("w_meta", 0.3))

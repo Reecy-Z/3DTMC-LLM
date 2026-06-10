@@ -79,10 +79,10 @@ PROPERTY_MODES = STAGE3_INFER_MODES
 TMQM_TASKS = frozenset({"dipole_moment", "polarisability", "homo_lumo_gap"})
 
 DEFAULT_PROPERTY_OOD_LMDB = [
-    "/data/jingyuan_data/tmqmg/stage3/train/tmqmg_atom_only_new.lmdb",
-    "/data/jingyuan_data/tmqmg/stage3/test/tmqmg_atom_only_new.lmdb",
+    "/path/to/tmqmg/stage3/train/tmqmg_atom_only_new.lmdb",
+    "/path/to/tmqmg/stage3/test/tmqmg_atom_only_new.lmdb",
 ]
-DEFAULT_NICOMPLEX_LMDB = "/data/jingyuan_data/NiComplex/data.lmdb"
+DEFAULT_NICOMPLEX_LMDB = "/path/to/NiComplex/data.lmdb"
 DEFAULT_VASKA_LMDB = VASKA_DEFAULTS["lmdb"]
 
 DESCRIPTION_MODE_CONFIG: Dict[str, Dict[str, Any]] = {
@@ -114,7 +114,7 @@ DESCRIPTION_MODE_CONFIG: Dict[str, Dict[str, Any]] = {
     },
 }
 
-DEFAULT_PROPERTY_TEST_LMDB = "/data/jingyuan_data/tmqmg/stage3/test/tmqmg_atom_only_new.lmdb"
+DEFAULT_PROPERTY_TEST_LMDB = "/path/to/tmqmg/stage3/test/tmqmg_atom_only_new.lmdb"
 
 
 # ---------------------------------------------------------------------------

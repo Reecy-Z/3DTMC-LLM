@@ -4,7 +4,7 @@
 from pickle import NONE
 
 
-UNICORE_ROOT = "/home/featurize/work/Uni-Core"
+UNICORE_ROOT = "/path/to/Uni-Core"
 
 STAGE1_DEFAULTS = {
     "model_name": "/path/to/HF_models/Qwen3-4B-Instruct-2507",
@@ -82,8 +82,8 @@ NICOMPLEX_OOD_DEFAULTS = {
     "epochs": 1,
     "batch_size": 16,
     "save_steps": 50,
-    "output_dir": "/data/jingyuan_data/NiComplex_OOD_Models",
-    "lmdb": ["/data/jingyuan_data/NiComplex/data.lmdb"],
+    "output_dir": "/path/to/NiComplex_OOD_Models",
+    "lmdb": ["/path/to/NiComplex/data.lmdb"],
 }
 
 VASKA_DEFAULTS = {
@@ -108,5 +108,5 @@ DESCRIPTION_DEFAULTS = {
     "model_name": VASKA_DEFAULTS["model_name"],
     "3D_encoder_dict": VASKA_DEFAULTS["3D_encoder_dict"],
     "random_3d_seed": 42,
-    "test_lmdb": "/home/featurize/TMC-Prop3D-Enriched/test/tmc.lmdb",
+    "test_lmdb": "/path/to/TMC-Prop3D-Enriched/test/tmc.lmdb",
 }

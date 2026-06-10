@@ -19,7 +19,7 @@ from MetalloGen import chem, process
 
 class MLPotential: # Only can be combined with Gaussian! 
 
-    #opt(nomicro,modredundant) external='/home/lkh/.conda/envs/mlatom/bin/python3 /home/lkh/.conda/envs/mlatom/lib/python3.9/site-packages/MLatom/geomopt.py'
+    #opt(nomicro,modredundant) external='/path/to/conda/envs/mlatom/bin/python3 /path/to/conda/envs/mlatom/lib/python3.9/site-packages/MLatom/geomopt.py'
     def __init__(self,command='g16',functional='AIQM1',working_directory=None):
         # Check command
         check = distutils.spawn.find_executable(command)

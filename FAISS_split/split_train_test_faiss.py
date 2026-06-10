@@ -255,14 +255,14 @@ def main() -> None:
     parser.add_argument(
         "--input",
         type=Path,
-        default=Path("/home/zhujingyuan/TMC/tmQM_coordination_results_G_smiles.csv"),
+        default=Path("/path/to/tmQMg/all.csv"),
     )
     parser.add_argument("--smiles-col", default="SMILES_CSD_fixed")
     parser.add_argument("--id-col", default="CSD_code")
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("/home/zhujingyuan/TMC/tmQM_faiss_cluster_split.csv"),
+        default=Path("/path/to/tmQM_faiss_cluster_split.csv"),
     )
     parser.add_argument("--n-clusters", type=int, default=150)
     parser.add_argument("--kmeans-niter", type=int, default=25)

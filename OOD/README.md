@@ -40,7 +40,7 @@ Standard (non-OOD) property eval requires `--fixed_lmdb_eval` with `--test_lmdb`
 python inference.py stage3 \
   --task vaska_barrier \
   --holdout_ligand dft-co \
-  --lmdb /data/jingyuan_data/vaskas-space/data.lmdb \
+  --lmdb /path/to/vaskas-space/data.lmdb \
   --Stage3_ckpt /path/to/ligand_dft-co \
   --save_json ood_preds.json
 ```
@@ -55,7 +55,7 @@ Shell: `./run_vaska_ligand_ood_train_infer.sh`
 python inference.py stage3 \
   --task nicomplex_ddg \
   --ood_experiment train_rest_test_Pybox \
-  --lmdb /data/jingyuan_data/NiComplex/data.lmdb \
+  --lmdb /path/to/NiComplex/data.lmdb \
   --Stage3_ckpt /path/to/exp_train_rest_test_Pybox \
   --save_json ood_preds.json
 ```

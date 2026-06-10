@@ -70,7 +70,8 @@ from typing import List, Tuple, Optional, Dict
 from contextlib import redirect_stdout, redirect_stderr
 
 # xtb-gaussian executable; set each run for MetalloGen Gaussian external interface.
-os.environ["xtbbin"] = "/home/zhujingyuan/xtb-gaussian/xtb-gaussian"
+if "xtbbin" not in os.environ:
+    os.environ["xtbbin"] = "/path/to/xtb-gaussian/xtb-gaussian"
 
 class Tee:
     """Mirror write() to multiple streams (e.g. terminal + log file)."""

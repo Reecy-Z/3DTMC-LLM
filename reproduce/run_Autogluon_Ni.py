@@ -305,7 +305,7 @@ def main() -> None:
     parser.add_argument(
         "--desc-csv",
         required=True,
-        help="Descriptor CSV path, e.g. /data/jingyuan_data/NiComplex/DFT.csv or MAF.csv",
+        help="Descriptor CSV path, e.g. /path/to/NiComplex/DFT.csv or MAF.csv",
     )
     parser.add_argument(
         "--split",

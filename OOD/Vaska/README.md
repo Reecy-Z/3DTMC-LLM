@@ -14,7 +14,7 @@ deepspeed --num_gpus=2 OOD/Vaska/Vaska_Ligand_OOD.py --run_all_loops
 WANDB_MODE=disabled deepspeed --num_gpus=2 OOD/Vaska/Vaska_Ligand_OOD.py --holdout_ligand dft-co
 ```
 
-Output: `/data/jingyuan_data/Vaska_Ligand_OOD_Models/ligand_<name>/`
+Output: `/path/to/Vaska_Ligand_OOD_Models/ligand_<name>/`
 
 ## Inference
 
@@ -22,8 +22,8 @@ Output: `/data/jingyuan_data/Vaska_Ligand_OOD_Models/ligand_<name>/`
 python inference.py stage3 \
   --task vaska_barrier \
   --holdout_ligand dft-co \
-  --lmdb /data/jingyuan_data/vaskas-space/data.lmdb \
-  --Stage3_ckpt /data/jingyuan_data/Vaska_Ligand_OOD_Models/ligand_dft-co \
+  --lmdb /path/to/vaskas-space/data.lmdb \
+  --Stage3_ckpt /path/to/Vaska_Ligand_OOD_Models/ligand_dft-co \
   --save_json ood_preds.json
 ```
 

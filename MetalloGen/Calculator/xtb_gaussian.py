@@ -49,7 +49,7 @@ def copy_params(params):
 
 class XTB_Gaussian: # Only can be combined with Gaussian! 
 
-    #opt(nomicro,modredundant) external='/home/lkh/.conda/envs/xtb_gaussianatom/bin/python3 /home/lkh/.conda/envs/xtb_gaussianatom/lib/python3.9/site-packages/xtb_gaussianatom/geomopt.py'
+    #opt(nomicro,modredundant) external='/path/to/conda/envs/xtb_gaussianatom/bin/python3 /path/to/conda/envs/xtb_gaussianatom/lib/python3.9/site-packages/xtb_gaussianatom/geomopt.py'
     def __init__(self,command='g16',working_directory=None):
         # Check command
         check = distutils.spawn.find_executable(command)

@@ -7,7 +7,7 @@ from typing import Dict, List, Set, Tuple
 
 LIGAND_SLOT_FIELDS = ("ligand_a1", "ligand_a2", "ligand_b", "ligand_c")
 
-# 26 unique ligands in /data/jingyuan_data/vaskas-space/data.lmdb (1947 samples).
+# 26 unique ligands in vaskas-space/data.lmdb (1947 samples in the reference release).
 LIGANDS = (
     "bromide",
     "chloride",

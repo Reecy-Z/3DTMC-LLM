@@ -32,12 +32,12 @@ from train_defaults import PROPERTY_DEFAULTS, VASKA_DEFAULTS
 from OOD.property.cluster_split import split_output_suffix, summarize_split_source
 from OOD.property.dataset_ood import TmQMgClusterSplitDataset
 
-DEFAULT_STAGE2_CKPT = "/data/jingyuan_data/3DTMC-LLM/Stage2"
+DEFAULT_STAGE2_CKPT = "/path/to/STAGE2/checkpoint"
 DEFAULT_EPOCHS = 10
 DEFAULT_SAVE_STEPS = 1000
 DEFAULT_LMDB_PATHS = [
-    "/data/jingyuan_data/tmqmg/stage3/train/tmqmg_atom_only_new.lmdb",
-    "/data/jingyuan_data/tmqmg/stage3/test/tmqmg_atom_only_new.lmdb",
+    "/path/to/tmqmg/stage3/train/tmqmg_atom_only_new.lmdb",
+    "/path/to/tmqmg/stage3/test/tmqmg_atom_only_new.lmdb",
 ]
 
 PROPERTY_OOD_DEFAULTS = {
@@ -136,7 +136,7 @@ if __name__ == "__main__":
 
     split_tag = split_output_suffix(args_main.split_csv)
     output_dir = args_main.output_dir or (
-        f"/data/jingyuan_data/OOD_Property_{prop_cfg['output_dir_suffix']}_{split_tag}_ckpt"
+        f"/path/to/OOD_Property_{prop_cfg['output_dir_suffix']}_{split_tag}_ckpt"
     )
 
     if local_rank == 0:

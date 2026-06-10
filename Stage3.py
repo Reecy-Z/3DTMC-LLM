@@ -128,8 +128,8 @@ def _output_dir(args: argparse.Namespace, task: str) -> str:
     spec = get_task(task)
     suffix = spec.output_dir_suffix or task
     if args.mode == "single_token":
-        return f"/data/jingyuan_data/Stage3_{suffix}_ckpt"
-    return f"/data/jingyuan_data/Stage3_{suffix}_{args.mode}_ckpt"
+        return f"/path/to/Stage3_{suffix}_ckpt"
+    return f"/path/to/Stage3_{suffix}_{args.mode}_ckpt"
 
 
 def _instruction_for_run(args: argparse.Namespace, task: str) -> str | None:

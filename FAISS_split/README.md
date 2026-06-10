@@ -52,7 +52,7 @@ Pass a `.npz` file to `--fingerprints-npz`. It must contain:
 - `vectors` — fingerprint vectors aligned with `csd_codes`  
 - `metal_symbol`, `formal_charge`, `d_electrons` — per-row metadata  
 
-Example path: `/data/jingyuan_data/tmQMg_complex_fingerprints.npz`
+Example path: `/path/to/tmQMg_complex_fingerprints.npz`
 
 If you omit `--fingerprints-npz`, the script builds fingerprints from SMILES on the fly (fine for small sets / debugging, slow at scale).
 
@@ -69,7 +69,7 @@ python split_train_test_faiss.py \
   --input tmQMg/all.csv \
   --id-col "CSD code" \
   --smiles-col smiles \
-  --fingerprints-npz /data/jingyuan_data/tmQMg_complex_fingerprints.npz \
+  --fingerprints-npz /path/to/tmQMg_complex_fingerprints.npz \
   --n-clusters 150 \
   --kmeans-niter 25 \
   --test-frac-min 0.10 \
@@ -98,7 +98,7 @@ python split_train_test_faiss.py \
   --input tmQMg/all.csv \
   --id-col "CSD code" \
   --smiles-col smiles \
-  --fingerprints-npz /data/jingyuan_data/tmQMg_complex_fingerprints.npz \
+  --fingerprints-npz /path/to/tmQMg_complex_fingerprints.npz \
   --max-samples 1000 \
   --export-dir /tmp/split_debug
 ```

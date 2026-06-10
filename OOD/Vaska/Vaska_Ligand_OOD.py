@@ -45,7 +45,7 @@ from OOD.Vaska.ligand_split import (
     summarize_ligand_presence,
 )
 
-DEFAULT_OUTPUT_DIR = "/data/jingyuan_data/Vaska_Ligand_OOD_Models"
+DEFAULT_OUTPUT_DIR = "/path/to/Vaska_Ligand_OOD_Models"
 
 
 def _wandb_disabled() -> bool:
