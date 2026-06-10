@@ -8,7 +8,10 @@ Ligand list: `OOD/Vaska/ligand_split.py` → `LIGANDS` (26 names).
 
 ```bash
 deepspeed --num_gpus=2 OOD/Vaska/Vaska_Ligand_OOD.py --holdout_ligand dft-co
+# --run_all_loops spawns one deepspeed job per ligand (safe for LoRA reload)
 deepspeed --num_gpus=2 OOD/Vaska/Vaska_Ligand_OOD.py --run_all_loops
+# Offline / no wandb account:
+WANDB_MODE=disabled deepspeed --num_gpus=2 OOD/Vaska/Vaska_Ligand_OOD.py --holdout_ligand dft-co
 ```
 
 Output: `/data/jingyuan_data/Vaska_Ligand_OOD_Models/ligand_<name>/`

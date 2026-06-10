@@ -141,8 +141,8 @@ _VASKA_BARRIER = (
 )
 _NICOMPLEX_DDG = (
     "The key Ni(III) intermediate complex, bearing chiral ligands and carbon groups, "
-    "determines the enantioselectivity (ΔΔG) of nickel-catalyzed cross-coupling reactions. "
-    "What is the ΔΔG (in kcal/mol) for this reaction? "
+    "determines the enantioselectivity (\u2206\u2206G) of nickel-catalyzed cross-coupling reactions. "
+    "What is the \u2206\u2206G (in kcal/mol) for this reaction? "
     "Given the Ni(III) intermediate {smiles} and {temp} K, respond with the numerical value only:"
 )
 

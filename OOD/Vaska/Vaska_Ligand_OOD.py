@@ -9,11 +9,16 @@ Same model stack as Stage3/Vaska_Complex.py (single-token + SMILES + 3D).
 Example (one fold):
   deepspeed --num_gpus=2 OOD/Vaska/Vaska_Ligand_OOD.py --holdout_ligand dft-co
 
-Example (all 26 folds):
+Example (all 26 folds — spawns one deepspeed job per ligand):
   deepspeed --num_gpus=2 OOD/Vaska/Vaska_Ligand_OOD.py --run_all_loops
+
+Prefer the shell wrapper for full train+infer:
+  ./run_vaska_ligand_ood_train_infer.sh
 """
 import json
 import os
+import shutil
+import subprocess
 import sys
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -43,6 +48,56 @@ from OOD.Vaska.ligand_split import (
 DEFAULT_OUTPUT_DIR = "/data/jingyuan_data/Vaska_Ligand_OOD_Models"
 
 
+def _wandb_disabled() -> bool:
+    return os.environ.get("WANDB_MODE", "").lower() in ("disabled", "offline")
+
+
+def _spawn_all_loops(args_main) -> None:
+    """Train each LOLO fold in a fresh deepspeed process (avoids LoRA reload issues)."""
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    if world_size > 1 and local_rank != 0:
+        sys.exit(0)
+
+    deepspeed = shutil.which("deepspeed")
+    if deepspeed is None:
+        raise RuntimeError(
+            "deepspeed not found in PATH; train folds individually with --holdout_ligand "
+            "or use ./run_vaska_ligand_ood_train_infer.sh"
+        )
+
+    script = os.path.abspath(__file__)
+    num_gpus = world_size if world_size > 1 else 1
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    if world_size == 1 and visible:
+        num_gpus = max(1, len([g for g in visible.split(",") if g.strip()]))
+
+    passthrough = []
+    skip_next = False
+    for arg in sys.argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--run_all_loops":
+            continue
+        if arg == "--holdout_ligand":
+            skip_next = True
+            continue
+        passthrough.append(arg)
+
+    for holdout in LIGANDS:
+        cmd = [
+            deepspeed,
+            f"--num_gpus={num_gpus}",
+            script,
+            "--holdout_ligand",
+            holdout,
+            *passthrough,
+        ]
+        print(f"[Vaska-Ligand-OOD] spawning fold ligand={holdout}: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True)
+
+
 def _train_one_fold(args, holdout_ligand: str, all_raw: list, local_rank: int):
     train_samples, ood_test_samples = lolo_split_by_ligand(all_raw, holdout_ligand)
     fold_dir = os.path.join(args.output_dir, ligand_dirname(holdout_ligand))
@@ -65,12 +120,13 @@ def _train_one_fold(args, holdout_ligand: str, all_raw: list, local_rank: int):
             f"  train={len(train_samples)} ood_test={len(ood_test_samples)}\n"
             f"  output_dir={fold_dir}"
         )
-        wandb.init(
-            project="Vaska_OOD_ligand",
-            name=ligand_dirname(holdout_ligand),
-            reinit=True,
-            config={**vars(args), "holdout_ligand": holdout_ligand},
-        )
+        if not _wandb_disabled():
+            wandb.init(
+                project="Vaska_OOD_ligand",
+                name=ligand_dirname(holdout_ligand),
+                reinit=True,
+                config={**vars(args), "holdout_ligand": holdout_ligand},
+            )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     model = MultimodalModel(
@@ -105,7 +161,7 @@ def _train_one_fold(args, holdout_ligand: str, all_raw: list, local_rank: int):
         save_steps=args.save_steps,
         save_strategy="steps",
         eval_strategy="no",
-        report_to="wandb",
+        report_to="none" if _wandb_disabled() else "wandb",
         ddp_find_unused_parameters=False,
         label_names=["labels"],
         remove_unused_columns=False,
@@ -127,7 +183,8 @@ def _train_one_fold(args, holdout_ligand: str, all_raw: list, local_rank: int):
     if local_rank == 0:
         with open(os.path.join(fold_dir, "holdout_ligand.txt"), "w", encoding="utf-8") as f:
             f.write(holdout_ligand + "\n")
-        wandb.finish()
+        if wandb.run is not None:
+            wandb.finish()
 
 
 if __name__ == "__main__":
@@ -141,7 +198,11 @@ if __name__ == "__main__":
     parser.add_argument("--lmdb", type=str, default=VASKA_DEFAULTS["lmdb"])
     parser.add_argument("--output_dir", type=str, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--holdout_ligand", type=str, default=None, choices=list(LIGANDS))
-    parser.add_argument("--run_all_loops", action="store_true", help="Sequentially train all 26 LOLO folds")
+    parser.add_argument(
+        "--run_all_loops",
+        action="store_true",
+        help="Train all 26 LOLO folds (one deepspeed job per ligand)",
+    )
     parser.add_argument("--lora_r", type=int, default=VASKA_DEFAULTS["lora_r"])
     parser.add_argument("--lora_alpha", type=int, default=VASKA_DEFAULTS["lora_alpha"])
     parser.add_argument("--lora_target", type=str, default=VASKA_DEFAULTS["lora_target"], choices=["qv", "qkv", "all"])
@@ -155,6 +216,10 @@ if __name__ == "__main__":
 
     if not args_main.run_all_loops and not args_main.holdout_ligand:
         parser.error("Specify --holdout_ligand <name> or --run_all_loops")
+
+    if args_main.run_all_loops:
+        _spawn_all_loops(args_main)
+        sys.exit(0)
 
     try:
         import multiprocessing
@@ -173,6 +238,4 @@ if __name__ == "__main__":
     if local_rank == 0:
         print(f"[Vaska-Ligand-OOD] loaded {len(all_raw)} samples")
 
-    folds = list(LIGANDS) if args_main.run_all_loops else [args_main.holdout_ligand]
-    for holdout in folds:
-        _train_one_fold(args_main, holdout, all_raw, local_rank)
+    _train_one_fold(args_main, args_main.holdout_ligand, all_raw, local_rank)

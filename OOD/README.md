@@ -26,7 +26,13 @@ python inference.py stage3 \
 CSV format: columns `CSD code` (or `csd_code`) and `split` (`train` / `test`).  
 Alternatively, a directory with `train.csv` and `test.csv` (CSD code lists only).
 
-Train + infer all three properties: `./run_ood_property_train_infer.sh` (set `SPLIT_SOURCE` to your CSV).
+Train + infer all three properties:
+
+```bash
+SPLIT_SOURCE=/path/to/cluster_split.csv ./run_ood_property_train_infer.sh
+```
+
+Standard (non-OOD) property eval requires `--fixed_lmdb_eval` with `--test_lmdb` (see root `README.md`).
 
 ## Vaska (26 ligand OOD)
 

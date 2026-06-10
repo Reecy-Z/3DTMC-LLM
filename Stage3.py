@@ -47,7 +47,7 @@ from task_datasets import (
     TmQMgSingleTokenUnimolDataset,
     VaskaComplexDataset,
     load_merged_valid_nicomplex_records,
-    read_vaska_lmdb,
+    load_merged_valid_vaska_records,
 )
 from task_registry import (
     MODES_STAGE3,
@@ -480,16 +480,19 @@ def _run_vaska(args: argparse.Namespace, local_rank: int, output_dir: str):
         print(f"[Stage3] task=vaska_barrier mode=single_token | split_seed={split_seed}")
 
     lmdb_path = (args.lmdb_paths or [VASKA_DEFAULTS["lmdb"]])[0]
-    all_raw = read_vaska_lmdb(lmdb_path, max_samples=None)
-    if not all_raw:
-        raise RuntimeError(f"[Stage3] LMDB {lmdb_path} has no samples")
+    all_valid, skipped = load_merged_valid_vaska_records(lmdb_path, local_rank=local_rank)
+    if not all_valid:
+        raise RuntimeError(f"[Stage3] LMDB {lmdb_path} has no valid samples")
+    if skipped > 0 and local_rank == 0:
+        print(f"[Stage3] Skipped {skipped} invalid Vaska entries while loading")
 
-    train_samples, val_samples, test_samples, n_total = _random_80_10_10(all_raw, split_seed)
+    train_samples, val_samples, test_samples, n_total = _random_80_10_10(all_valid, split_seed)
     if local_rank == 0:
         os.makedirs(output_dir, exist_ok=True)
         print(
-            f"[Stage3] vaska_barrier | total={n_total}, train={len(train_samples)}, "
-            f"val={len(val_samples)}, test={len(test_samples)} | output_dir={output_dir}"
+            f"[Stage3] vaska_barrier | split_seed={split_seed} | total={n_total}, "
+            f"train={len(train_samples)}, val={len(val_samples)}, test={len(test_samples)} | "
+            f"output_dir={output_dir}"
         )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)

@@ -1,0 +1,20 @@
+# Minimal conda env for split_train_test_faiss.py (+ complex_fingerprint.py)
+# Create: conda env create -f environment-split.yml
+# Update: conda env update -f environment-split.yml --prune
+
+name: tmc-split
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy<2
+  - pandas
+  - scikit-learn
+  - tqdm
+  - rdkit
+  - mkl=2024.2
+  - faiss-cpu
+  - umap-learn
+  - matplotlib
+  - numba

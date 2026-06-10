@@ -1,12 +1,14 @@
 """
 OOD Property training: standard Stage3 single-token + Qwen3 flow,
-with train/test split from cluster_split_k150_far_from_train.csv (cluster OOD).
+with train/test split from user CSV (cluster OOD).
 
 LMDB keys are CSD codes matching the CSV ``CSD code`` column.
 
 Example:
-  deepspeed --num_gpus=2 OOD/property/Property_OOD.py --property dipole_moment
+  deepspeed --num_gpus=2 OOD/property/Property_OOD.py \\
+    --property dipole_moment --split_csv /path/to/cluster_split.csv
 """
+import json
 import os
 import sys
 
@@ -27,12 +29,10 @@ from Property import PROPERTY_CONFIG
 from multimodal_LLM import RECIPE_STAGE3, MultimodalModel
 from train_defaults import PROPERTY_DEFAULTS, VASKA_DEFAULTS
 
-from OOD.property.cluster_split import split_output_suffix
+from OOD.property.cluster_split import split_output_suffix, summarize_split_source
 from OOD.property.dataset_ood import TmQMgClusterSplitDataset
 
 DEFAULT_STAGE2_CKPT = "/data/jingyuan_data/3DTMC-LLM/Stage2"
-# Override with --split_csv pointing to your train/test CSV.
-DEFAULT_SPLIT_CSV = "/path/to/your_property_split.csv"
 DEFAULT_EPOCHS = 10
 DEFAULT_SAVE_STEPS = 1000
 DEFAULT_LMDB_PATHS = [
@@ -51,11 +51,15 @@ PROPERTY_OOD_DEFAULTS = {
 }
 
 
+def _wandb_disabled() -> bool:
+    return os.environ.get("WANDB_MODE", "").lower() in ("disabled", "offline")
+
+
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="OOD Property: cluster k150 far-from-train split + single-token 3D + Qwen3 SFT"
+        description="OOD Property: cluster CSV split + single-token 3D + Qwen3 SFT"
     )
     parser.add_argument("--model_name", type=str, default=PROPERTY_OOD_DEFAULTS["model_name"])
     parser.add_argument(
@@ -80,7 +84,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--split_csv",
         type=str,
-        default=DEFAULT_SPLIT_CSV,
+        required=True,
         help="Combined split CSV (CSD+split columns), or directory with train.csv and test.csv.",
     )
     parser.add_argument("--output_dir", type=str, default=None)
@@ -108,9 +112,11 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=PROPERTY_DEFAULTS["lr"])
     parser.add_argument("--batch_size", type=int, default=PROPERTY_DEFAULTS["batch_size"])
     parser.add_argument("--save_steps", type=int, default=PROPERTY_OOD_DEFAULTS["save_steps"])
-    parser.add_argument("--eval_steps", type=int, default=1000)
     parser.add_argument("--local_rank", type=int, default=-1)
     args_main = parser.parse_args()
+
+    if not os.path.exists(args_main.split_csv):
+        parser.error(f"--split_csv not found: {args_main.split_csv}")
 
     try:
         import multiprocessing
@@ -129,11 +135,16 @@ if __name__ == "__main__":
         instruction_use = prop_cfg.get("instruction_smiles") or prop_cfg.get("instruction_description")
 
     split_tag = split_output_suffix(args_main.split_csv)
+    output_dir = args_main.output_dir or (
+        f"/data/jingyuan_data/OOD_Property_{prop_cfg['output_dir_suffix']}_{split_tag}_ckpt"
+    )
+
     if local_rank == 0:
-        wandb.init(project=f"OOD_Property_{prop_cfg['output_dir_suffix']}_{split_tag}")
+        if not _wandb_disabled():
+            wandb.init(project=f"OOD_Property_{prop_cfg['output_dir_suffix']}_{split_tag}")
         print(
             f"[Property-OOD] property={args_main.property}; split={args_main.split_csv}; "
-            f"tag={split_tag}; "
+            f"tag={split_tag}; output_dir={output_dir}; "
             f"prompt={'description+SMILES+3D' if args_main.use_polished_description else 'SMILES+3D'}"
         )
 
@@ -162,14 +173,10 @@ if __name__ == "__main__":
         use_polished_description=args_main.use_polished_description,
     )
     train_dataset = TmQMgClusterSplitDataset(**ds_common, split_name="train")
-    eval_dataset = TmQMgClusterSplitDataset(**ds_common, split_name="test")
 
     if local_rank == 0:
-        print(f"[Property-OOD] Train (cluster train): {len(train_dataset)} | Eval (cluster test): {len(eval_dataset)}")
+        print(f"[Property-OOD] Train (cluster train): {len(train_dataset)} samples")
 
-    output_dir = args_main.output_dir or (
-        f"/data/jingyuan_data/OOD_Property_{prop_cfg['output_dir_suffix']}_{split_tag}_ckpt"
-    )
     training_args = TrainingArguments(
         output_dir=output_dir,
         num_train_epochs=args_main.epochs,
@@ -184,9 +191,8 @@ if __name__ == "__main__":
         logging_steps=10,
         save_steps=args_main.save_steps,
         save_strategy="steps",
-        eval_strategy="steps",
-        eval_steps=args_main.eval_steps,
-        report_to="wandb",
+        eval_strategy="no",
+        report_to="none" if _wandb_disabled() else "wandb",
         ddp_find_unused_parameters=False,
         label_names=["labels"],
         remove_unused_columns=False,
@@ -194,15 +200,26 @@ if __name__ == "__main__":
         dataloader_num_workers=4,
         dataloader_prefetch_factor=2,
         save_total_limit=20,
-        load_best_model_at_end=False,
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
     )
     trainer = MultimodalFullTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
         data_collator=MultimodalCollator(tokenizer),
     )
     trainer.train()
+    trainer.save_model(output_dir)
+
+    if local_rank == 0:
+        meta = {
+            "property": args_main.property,
+            "split_csv": args_main.split_csv,
+            "split_labels": summarize_split_source(args_main.split_csv),
+            "lmdb_paths": args_main.lmdb_paths,
+            "use_polished_description": args_main.use_polished_description,
+            "n_train": len(train_dataset),
+        }
+        with open(os.path.join(output_dir, "ood_split.json"), "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+        if wandb.run is not None:
+            wandb.finish()

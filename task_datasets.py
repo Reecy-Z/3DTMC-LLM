@@ -141,6 +141,44 @@ def load_merged_valid_nicomplex_records(lmdb_paths, local_rank=0):
     return merged_valid, nan_skipped
 
 
+def is_valid_vaska_record(d: dict, property_key: str = "barrier") -> bool:
+    """True if record has finite barrier, 3D coords, and usable SMILES."""
+    if "atoms" not in d or "coordinates" not in d or property_key not in d:
+        return False
+    try:
+        if np.isnan(float(d[property_key])):
+            return False
+    except (ValueError, TypeError):
+        return False
+    return bool(format_instruction_field(d.get("smiles")))
+
+
+def filter_valid_vaska_records(records) -> list[dict]:
+    return [d for d in records if is_valid_vaska_record(d)]
+
+
+def load_merged_valid_vaska_records(
+    lmdb_path,
+    max_samples=None,
+    local_rank=0,
+    show_progress=True,
+):
+    """Load Vaska LMDB; return records with valid barrier + SMILES + 3D."""
+    if not os.path.exists(lmdb_path):
+        if local_rank == 0:
+            print(f"[Vaska] skip missing LMDB: {lmdb_path}")
+        return [], 0
+    all_raw = read_vaska_lmdb(lmdb_path, max_samples=max_samples, show_progress=show_progress)
+    merged_valid: list[dict] = []
+    skipped = 0
+    for d in all_raw:
+        if is_valid_vaska_record(d):
+            merged_valid.append(d)
+        else:
+            skipped += 1
+    return merged_valid, skipped
+
+
 class TmQMEnrichedLMDBDataset(Dataset):
     """LMDB: instruction + SMILES + atoms + coordinates -> polished_description."""
 
@@ -590,20 +628,19 @@ class VaskaComplexDataset(Dataset):
                 data_iter.extend(read_vaska_lmdb(p, max_samples=max_samples))
 
         for d in data_iter:
-            if "atoms" not in d or "coordinates" not in d or self.property_key not in d:
+            if is_valid_vaska_record(d, self.property_key):
+                self.samples.append(d)
                 continue
-            try:
-                val = float(d[self.property_key])
-                if np.isnan(val):
+            if "atoms" in d and "coordinates" in d and self.property_key in d:
+                try:
+                    val = float(d[self.property_key])
+                    if np.isnan(val):
+                        nan_skipped += 1
+                        continue
+                except (ValueError, TypeError):
                     nan_skipped += 1
                     continue
-            except (ValueError, TypeError):
-                nan_skipped += 1
-                continue
-            if not format_instruction_field(d.get("smiles")):
-                smiles_skipped += 1
-                continue
-            self.samples.append(d)
+            smiles_skipped += 1
 
         if not self.samples and int(os.environ.get("LOCAL_RANK", 0)) == 0:
             src = lmdb_paths if samples is None else "provided samples"
@@ -725,7 +762,10 @@ __all__ = [
     "TmQMg3DOnlyUnimolDataset",
     "TmQMgSingleTokenUnimolDataset",
     "VaskaComplexDataset",
+    "filter_valid_vaska_records",
+    "is_valid_vaska_record",
     "load_merged_valid_nicomplex_records",
+    "load_merged_valid_vaska_records",
     "read_nicomplex_lmdb",
     "read_vaska_lmdb",
 ]

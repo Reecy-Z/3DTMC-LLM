@@ -2,7 +2,7 @@
 Backward-compatible entry point for NiComplex ΔΔG training.
 
 Prefer:
-  deepspeed Stage3.py --task nicomplex_ddg --lmdb /path/data.lmdb --split_seed 38
+  deepspeed Stage3.py --task nicomplex_ddg --lmdb /path/data.lmdb --split_seed 42
 """
 from __future__ import annotations
 

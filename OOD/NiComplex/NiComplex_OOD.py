@@ -74,12 +74,13 @@ def _train_one_experiment(args, experiment_name: str, all_valid: list, local_ran
             f"  train={len(train_samples)} ood_test={len(ood_test_samples)}\n"
             f"  output_dir={exp_dir}"
         )
-        wandb.init(
-            project="NiComplex_OOD",
-            name=experiment_name,
-            reinit=True,
-            config={**vars(args), "experiment": experiment_name},
-        )
+        if os.environ.get("WANDB_MODE", "").lower() not in ("disabled", "offline"):
+            wandb.init(
+                project="NiComplex_OOD",
+                name=experiment_name,
+                reinit=True,
+                config={**vars(args), "experiment": experiment_name},
+            )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     model = MultimodalModel(
@@ -118,7 +119,7 @@ def _train_one_experiment(args, experiment_name: str, all_valid: list, local_ran
         save_steps=args.save_steps,
         save_strategy="steps",
         eval_strategy="no",
-        report_to="wandb",
+        report_to="none" if os.environ.get("WANDB_MODE", "").lower() in ("disabled", "offline") else "wandb",
         ddp_find_unused_parameters=False,
         label_names=["labels"],
         remove_unused_columns=False,
@@ -140,7 +141,8 @@ def _train_one_experiment(args, experiment_name: str, all_valid: list, local_ran
     if local_rank == 0:
         with open(os.path.join(exp_dir, "experiment.txt"), "w", encoding="utf-8") as f:
             f.write(experiment_name + "\n")
-        wandb.finish()
+        if wandb.run is not None:
+            wandb.finish()
 
 
 if __name__ == "__main__":

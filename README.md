@@ -32,6 +32,7 @@ Checkpoints and Stage 1 data for **3DTMC-LLM** are published on Hugging Face und
 | **3D encoder (pretrained)** | [3D_encoder_pretrain](https://huggingface.co/Reecy/3DTMC-LLM/tree/main/3D_encoder_pretrain) |
 | **Atom vocabulary for the 3D encoder** (`dict.txt` format) | [3D_encoder_dict.txt](https://huggingface.co/Reecy/3DTMC-LLM/blob/main/3D_encoder_dict.txt) (also shipped as `3D_encoder_dict.txt` in this repo) |
 | **Stage 1 — TMC-Prop3D** (LMDB) | [TMC-Prop3D.lmdb](https://huggingface.co/Reecy/3DTMC-LLM/blob/main/TMC-Prop3D.lmdb) |
+| **tmQMg — master table + random `Split`** | [tmQMg/all.csv](https://huggingface.co/Reecy/3DTMC-LLM/blob/main/tmQMg/all.csv) |
 
 **Building datasets / text corpora**
 
@@ -145,7 +146,7 @@ Initialize from a **Stage 2 checkpoint** (`Stage2_ckpt`: HF adapter + encoder we
 
 | `--task` | Target | Split | Default data |
 |----------|--------|-------|--------------|
-| `dipole_moment` | dipole (Debye) | fixed train/val LMDB | [tmQMg](https://github.com/hkneiding/tmqmg) |
+| `dipole_moment` | dipole (Debye) | fixed train/val LMDB (see **tmQMg** below) | [tmQMg](https://github.com/hkneiding/tmqmg) |
 | `polarisability` | polarisability (Bohr³) | fixed train/val LMDB | tmQMg |
 | `homo_lumo_gap` | HOMO–LUMO gap (Ha) | fixed train/val LMDB | tmQMg |
 | `vaska_barrier` | H₂ activation barrier (kcal/mol) | random 80/10/10 (`--split_seed`) | [vaskas-space](https://github.com/pascalfriederich/vaskas-space) — prebuilt LMDB: **[`vaskas-space/data.lmdb`](https://huggingface.co/Reecy/3DTMC-LLM/tree/main/vaskas-space)** |
@@ -180,13 +181,21 @@ CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Stage3.py \
 CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Stage3.py \
   --task nicomplex_ddg \
   --lmdb /path/to/NiComplex/data.lmdb \
-  --split_seed 38
+  --split_seed 42
 
 # Property ablation: frozen 3D encoder
 CUDA_VISIBLE_DEVICES=0,1 deepspeed --num_gpus=2 Stage3.py \
   --task dipole_moment --mode freeze_3d \
   --3D_encoder_ckpt /path/to/encoder.pt
 ```
+
+**tmQMg data preparation**
+
+1. **Download structures** — Fetch TMC **XYZ** coordinates from the upstream **[tmQMg](https://github.com/hkneiding/tmqmg)** release (see that repository for archives and file layout). Build LMDB shards with `atoms`, `coordinates`, `smiles`, and property fields (`dipole_moment`, `polarisability`, `homo_lumo_gap`). If SMILES are not bundled with the XYZ, derive them with **[xyz2mol_tm](https://github.com/jensengroup/xyz2mol_tm)** (Section 7).
+
+2. **Random train / test split** — Use the published master table **[tmQMg/all.csv](https://huggingface.co/Reecy/3DTMC-LLM/blob/main/tmQMg/all.csv)** on Hugging Face. The **`Split`** column (`train` / `test`) defines the **random** holdout by `CSD code`. Subset your LMDB (or export ID lists) to match these folds for standard Stage 3 property training (`--train_lmdb` / `--val_lmdb`) and inference with `--fixed_lmdb_eval`.
+
+3. **Similarity-controlled (OOD) split** — For cluster-based holdouts in fingerprint space (entire clusters held out as test), follow **[FAISS_split/README.md](FAISS_split/README.md)**: run `split_train_test_faiss.py` (default **K=150**, `far_from_train` strategy), then train with **`OOD/property/Property_OOD.py`** and evaluate with `inference.py stage3 --split_csv ...` (see **`OOD/README.md`**).
 
 **NiComplex data preparation:** **`datasets_generation/build_ni_complex.py`** uses **MetalloGen** to assemble a five-coordinate square-pyramidal Ni complex from ligand/substrate XYZ fragments and writes **`complex_Ni.xyz`**. Requires Gaussian/xtb setup as in the script header.
 
@@ -219,15 +228,17 @@ Supported `--mode` values: `stage2`, `freeze_3d`, `random_3d`, `3d_only`, `multi
 ### Stage 3 property / downstream evaluation
 
 ```bash
-# TmQM property on a held-out LMDB
+# TmQM property on a held-out LMDB (fixed train/val split)
 python inference.py stage3 \
   --task dipole_moment \
+  --fixed_lmdb_eval \
   --Stage3_ckpt /path/to/checkpoint \
   --test_lmdb /path/to/test.lmdb
 
-# Vaska barrier (single random split)
+# Vaska barrier (random 80/10/10 test fold)
 python inference.py stage3 \
   --task vaska_barrier \
+  --random_split \
   --Stage3_ckpt /path/to/checkpoint \
   --lmdb /path/to/vaskas-space/data.lmdb \
   --split_seed 43
@@ -306,6 +317,7 @@ CUDA_VISIBLE_DEVICES=0 python inference_demo.py \
 | `inference.py` | Unified batch inference and regression evaluation |
 | `inference_demo.py` | Generic single-structure generation demo |
 | `OOD/` | OOD split utilities and task-specific OOD training scripts |
+| `FAISS_split/` | ComplexFingerprint + FAISS cluster train/test splits for tmQMg OOD |
 | `OOD/property/` | Property OOD training, CSV cluster splits, and dataset helpers |
 | `OOD/Vaska/`, `OOD/NiComplex/` | Vaska ligand and NiComplex scaffold OOD training |
 | `train_defaults.py` | Default paths and hyperparameters |

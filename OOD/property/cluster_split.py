@@ -1,8 +1,8 @@
 """Cluster-based train/test split from tmQMg CSV(s) (CSD code keys).
 
 Supports:
-  - Single CSV with ``CSD code`` + ``split`` columns (e.g. cluster_split_k200.csv)
-  - Directory with ``train.csv`` and ``test.csv`` (e.g. split_k200_far_from_train/)
+  - Single CSV with ``CSD code`` + ``split`` columns (e.g. cluster_split_k150.csv)
+  - Directory with ``train.csv`` and ``test.csv`` (e.g. split_k150_far_from_train/)
 """
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ def summarize_split_source(split_source: str) -> Dict[str, int]:
 
 
 def split_output_suffix(split_source: str) -> str:
-    """Basename tag for checkpoint dirs (e.g. split_k200_far_from_train)."""
+    """Basename tag for checkpoint dirs (e.g. split_k150_far_from_train)."""
     if is_split_directory(split_source):
         return os.path.basename(os.path.normpath(split_source))
     base = os.path.basename(split_source)

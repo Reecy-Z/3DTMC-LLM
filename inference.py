@@ -7,7 +7,8 @@ Library usage:
 CLI:
   python inference.py description --mode stage2 --ckpt ... --save_json ...
   python inference.py description --mode multi_token --ckpt ... --save_json ...
-  python inference.py stage3 --task dipole_moment --Stage3_ckpt ... --split_csv split.csv
+  python inference.py stage3 --task dipole_moment --Stage3_ckpt ... --split_csv split.csv  # OOD
+  python inference.py stage3 --task dipole_moment --fixed_lmdb_eval --Stage3_ckpt ... --test_lmdb ...
   python inference.py stage3 --task vaska_barrier --holdout_ligand dft-co --lmdb ... --Stage3_ckpt ...
   python inference.py stage3 --task nicomplex_ddg --ood_experiment train_rest_test_Pybox --Stage3_ckpt ...
 """
@@ -44,7 +45,9 @@ from task_datasets import (
     TmQMg3DOnlyUnimolDataset,
     TmQMgSingleTokenUnimolDataset,
     atoms_coords_from_record,
+    filter_valid_vaska_records,
     load_merged_valid_nicomplex_records,
+    load_merged_valid_vaska_records,
     read_vaska_lmdb,
 )
 from task_registry import STAGE3_TASKS, get_task, normalize_task_name, resolve_instruction, resolve_user_content
@@ -58,7 +61,7 @@ from multimodal_LLM import (
     generate_with_single_token_structure,
     generate_with_random_structure,
 )
-from train_defaults import DESCRIPTION_DEFAULTS, VASKA_DEFAULTS
+from train_defaults import DESCRIPTION_DEFAULTS, NICOMPLEX_DEFAULTS, VASKA_DEFAULTS
 from utils import (
     OBJECT_REF_CHAT_SEP,
     UNIMOL_MAX_SEQ_LEN,
@@ -256,6 +259,10 @@ def collect_property_eval_samples(dataset) -> List[Tuple[list, np.ndarray, str, 
     """Return (atoms, coords, user_content, y_true) from a property dataset."""
     samples = []
     prop_key = getattr(dataset, "property_key", None)
+    task_name = getattr(dataset, "task_name", None) or prop_key
+    use_polished = getattr(dataset, "use_polished_description", False)
+    instruction_override = getattr(dataset, "instruction", None)
+    mode = "3d_only" if isinstance(dataset, TmQMg3DOnlyUnimolDataset) else "single_token"
     for lmdb_path, key_bytes in dataset.key_index:
         env = dataset._envs.get(lmdb_path)
         if env is None:
@@ -264,19 +271,14 @@ def collect_property_eval_samples(dataset) -> List[Tuple[list, np.ndarray, str, 
         with env.begin() as txn:
             data = pickle.loads(txn.get(key_bytes))
         y = float(data[prop_key])
-        atoms = data["atoms"]
-        if isinstance(atoms, np.ndarray):
-            atoms = atoms.tolist()
-        atoms = [str(a) if not hasattr(a, "item") else str(a.item()) for a in atoms]
-        coords = np.asarray(data["coordinates"], dtype=np.float32)
-        if coords.ndim == 3:
-            coords = coords[0]
-        atoms, coords = _atoms_coords_remove_h_center(atoms, coords)
-        if isinstance(dataset, TmQMg3DOnlyUnimolDataset):
-            user_content = dataset.instruction.strip()
-        else:
-            smiles = format_instruction_field(data.get("smiles"))
-            user_content = f"{dataset.instruction} {smiles}"
+        atoms, coords = atoms_coords_from_record(data)
+        user_content = resolve_user_content(
+            task_name,
+            data,
+            mode=mode,
+            use_polished_description=use_polished,
+            instruction_override=instruction_override,
+        )
         samples.append((atoms, coords, user_content, y))
     return samples
 
@@ -1003,6 +1005,16 @@ def collect_regression_samples_from_records(
     return rows
 
 
+def _split_seed_for_task(args: argparse.Namespace, task: str) -> int:
+    if args.split_seed is not None:
+        return args.split_seed
+    if task == "nicomplex_ddg":
+        return NICOMPLEX_DEFAULTS["split_seed"]
+    if task == "vaska_barrier":
+        return VASKA_DEFAULTS["split_seed"]
+    return VASKA_DEFAULTS["split_seed"]
+
+
 def _random_80_10_10_test_split(samples: Sequence[dict], split_seed: int) -> List[dict]:
     """Same 80/10/10 shuffle as Stage3.py / Vaska training; return test fold only."""
     n_total = len(samples)
@@ -1013,22 +1025,6 @@ def _random_80_10_10_test_split(samples: Sequence[dict], split_seed: int) -> Lis
     n_val = int(0.1 * n_total)
     test_idx = indices[n_train + n_val :]
     return [samples[i] for i in test_idx]
-
-
-def _filter_vaska_eval_records(records: Sequence[dict]) -> List[dict]:
-    valid = []
-    for d in records:
-        if "atoms" not in d or "coordinates" not in d or "barrier" not in d:
-            continue
-        try:
-            if np.isnan(float(d["barrier"])):
-                continue
-        except (ValueError, TypeError):
-            continue
-        if not format_instruction_field(d.get("smiles")):
-            continue
-        valid.append(d)
-    return valid
 
 
 def _run_regression_eval_loop(
@@ -1141,6 +1137,12 @@ def _load_stage3_eval_model(args: argparse.Namespace):
 def _eval_tmqm_task(args: argparse.Namespace, task: str) -> dict:
     from OOD.property.dataset_ood import TmQMgClusterSplitDataset
 
+    if not args.split_csv and not getattr(args, "fixed_lmdb_eval", False):
+        raise ValueError(
+            f"Task {task!r} requires --split_csv for cluster OOD eval, "
+            "or --fixed_lmdb_eval to evaluate on a held-out LMDB (--test_lmdb)."
+        )
+
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     model = _load_stage3_eval_model(args)
     instruction_use = args.instruction or resolve_instruction(
@@ -1166,7 +1168,7 @@ def _eval_tmqm_task(args: argparse.Namespace, task: str) -> dict:
         test_data = collect_property_eval_samples(dataset)
         tag = f"stage3-{task}-csv-{args.split_name}"
         extra = {"split_csv": args.split_csv, "split_name": args.split_name, "lmdb_paths": lmdb_paths}
-    else:
+    elif getattr(args, "fixed_lmdb_eval", False):
         if not os.path.isfile(args.test_lmdb):
             raise FileNotFoundError(f"Test LMDB not found: {args.test_lmdb}")
         if args.mode == "3d_only":
@@ -1189,6 +1191,8 @@ def _eval_tmqm_task(args: argparse.Namespace, task: str) -> dict:
         test_data = collect_property_eval_samples(dataset)
         tag = f"stage3-{task}"
         extra = {"test_lmdb": args.test_lmdb}
+    else:
+        raise AssertionError("unreachable: protocol validated above")
 
     print(f"[{tag}] valid={len(test_data)} | ckpt={args.stage3_ckpt}")
     y_true, y_pred, n_parse_fail, pred_records = _run_regression_eval_loop(
@@ -1220,7 +1224,7 @@ def _eval_vaska_holdout(args: argparse.Namespace, holdout_ligand: str, all_raw: 
     from OOD.Vaska.ligand_split import lolo_split_by_ligand
 
     _, ood_raw = lolo_split_by_ligand(all_raw, holdout_ligand)
-    test_records = _filter_vaska_eval_records(ood_raw)
+    test_records = filter_valid_vaska_records(ood_raw)
     test_data = collect_regression_samples_from_records(test_records, "vaska_barrier", mode="single_token")
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
@@ -1252,18 +1256,17 @@ def _eval_vaska_holdout(args: argparse.Namespace, holdout_ligand: str, all_raw: 
     )
 
 
-def _eval_vaska_random_split(args: argparse.Namespace, all_raw: list) -> dict:
+def _eval_vaska_random_split(args: argparse.Namespace, all_valid: list) -> dict:
     """Evaluate on 80/10/10 test fold (matches Stage3 vaska training split_seed)."""
-    split_seed = args.split_seed
-    test_raw = _random_80_10_10_test_split(all_raw, split_seed)
-    test_records = _filter_vaska_eval_records(test_raw)
-    test_data = collect_regression_samples_from_records(test_records, "vaska_barrier", mode="single_token")
+    split_seed = _split_seed_for_task(args, "vaska_barrier")
+    test_raw = _random_80_10_10_test_split(all_valid, split_seed)
+    test_data = collect_regression_samples_from_records(test_raw, "vaska_barrier", mode="single_token")
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     model = _load_stage3_eval_model(args)
     tag = f"stage3-vaska-seed_{split_seed}"
     print(
-        f"[{tag}] total={len(all_raw)} | test_raw={len(test_raw)} | valid={len(test_data)} | "
+        f"[{tag}] total={len(all_valid)} | test_raw={len(test_raw)} | valid={len(test_data)} | "
         f"ckpt={args.stage3_ckpt}"
     )
 
@@ -1293,7 +1296,7 @@ def _eval_vaska_random_split(args: argparse.Namespace, all_raw: list) -> dict:
 
 def _eval_nicomplex_random_split(args: argparse.Namespace, all_valid: list) -> dict:
     """Evaluate on 80/10/10 test fold (matches Stage3 nicomplex_ddg training split_seed)."""
-    split_seed = args.split_seed
+    split_seed = _split_seed_for_task(args, "nicomplex_ddg")
     test_raw = _random_80_10_10_test_split(all_valid, split_seed)
     instruction = args.instruction or NI_INSTRUCTION
     test_data = collect_regression_samples_from_records(
@@ -1401,6 +1404,14 @@ def eval_stage3(args: argparse.Namespace) -> None:
         from OOD.Vaska.ligand_split import LIGANDS
 
         lmdb_path = args.lmdb or DEFAULT_VASKA_LMDB
+
+        if getattr(args, "random_split", False):
+            all_valid, _ = load_merged_valid_vaska_records(lmdb_path, local_rank=0)
+            if not all_valid:
+                raise RuntimeError(f"Empty Vaska LMDB after filtering: {lmdb_path}")
+            eval_stage3._last_summary = _eval_vaska_random_split(args, all_valid)  # type: ignore[attr-defined]
+            return
+
         all_raw = read_vaska_lmdb(lmdb_path, max_samples=None, show_progress=True)
         if not all_raw:
             raise RuntimeError(f"Empty Vaska LMDB: {lmdb_path}")
@@ -1420,8 +1431,10 @@ def eval_stage3(args: argparse.Namespace) -> None:
         if args.holdout_ligand:
             eval_stage3._last_summary = _eval_vaska_holdout(args, args.holdout_ligand, all_raw)  # type: ignore[attr-defined]
             return
-        eval_stage3._last_summary = _eval_vaska_random_split(args, all_raw)  # type: ignore[attr-defined]
-        return
+        raise ValueError(
+            "vaska_barrier requires --holdout_ligand <name> or --run_all_ood for LOLO OOD eval. "
+            "For random 80/10/10 test fold, pass --random_split (uses split_seed=43 by default)."
+        )
 
     if task == "nicomplex_ddg":
         if args.mode != "single_token":
@@ -1449,8 +1462,13 @@ def eval_stage3(args: argparse.Namespace) -> None:
         if args.ood_experiment:
             eval_stage3._last_summary = _eval_nicomplex_experiment(args, args.ood_experiment, all_valid)  # type: ignore[attr-defined]
             return
-        eval_stage3._last_summary = _eval_nicomplex_random_split(args, all_valid)  # type: ignore[attr-defined]
-        return
+        if getattr(args, "random_split", False):
+            eval_stage3._last_summary = _eval_nicomplex_random_split(args, all_valid)  # type: ignore[attr-defined]
+            return
+        raise ValueError(
+            "nicomplex_ddg requires --ood_experiment <name> or --run_all_ood for scaffold OOD eval. "
+            "For random 80/10/10 test fold, pass --random_split (uses split_seed=42 by default)."
+        )
 
     raise ValueError(f"Unhandled task={task!r}")
 
@@ -1516,6 +1534,11 @@ def _add_stage3_regression_args(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--split_name", default="test", choices=["train", "test"])
     p.add_argument(
+        "--fixed_lmdb_eval",
+        action="store_true",
+        help="TmQM property: evaluate on --test_lmdb (fixed held-out LMDB), not cluster OOD CSV",
+    )
+    p.add_argument(
         "--holdout_ligand",
         default=None,
         help="Vaska 26-ligand OOD: held-out ligand (see OOD.Vaska.ligand_split.LIGANDS)",
@@ -1523,8 +1546,13 @@ def _add_stage3_regression_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--split_seed",
         type=int,
-        default=VASKA_DEFAULTS["split_seed"],
-        help="Vaska / NiComplex random 80/10/10 test fold (when OOD flags unset)",
+        default=None,
+        help="Random 80/10/10 test fold seed (default: 42 for nicomplex_ddg, 43 for vaska_barrier)",
+    )
+    p.add_argument(
+        "--random_split",
+        action="store_true",
+        help="Evaluate random 80/10/10 test fold (Vaska / NiComplex) instead of OOD holdout",
     )
     p.add_argument(
         "--ood_experiment",

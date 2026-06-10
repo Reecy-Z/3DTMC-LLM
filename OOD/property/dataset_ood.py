@@ -8,9 +8,9 @@ from typing import Optional, Set
 import lmdb
 import numpy as np
 
-from task_datasets import PROPERTY_CONFIG
+from task_datasets import PROPERTY_CONFIG, atoms_coords_from_record
+from task_registry import resolve_user_content
 from utils import (
-    _atoms_coords_remove_h_center,
     _lmdb_env_kwargs,
     format_instruction_field,
     tokenize_generation_sample_object_ref,
@@ -36,6 +36,7 @@ class TmQMgClusterSplitDataset:
     ):
         self.tokenizer = tokenizer
         self.property_key = property_key
+        self.task_name = property_key
         self.split_name = split_name.strip().lower()
         self.use_polished_description = use_polished_description
         pcfg = PROPERTY_CONFIG.get(property_key, PROPERTY_CONFIG["dipole_moment"])
@@ -114,7 +115,7 @@ class TmQMgClusterSplitDataset:
                 print(f"[Dataset-OOD] Skipped {smiles_skipped} samples (missing or empty SMILES)")
             print(
                 f"[Dataset-OOD] property={property_key}, split={self.split_name}, "
-                f"{len(self.key_index)} samples; mode=SMILES+3D (cluster k200)"
+                f"{len(self.key_index)} samples; mode=SMILES+3D (cluster CSV split)"
             )
 
     def __len__(self):
@@ -131,27 +132,14 @@ class TmQMgClusterSplitDataset:
             if raw is None:
                 raise KeyError(f"LMDB key not found: {key_bytes!r}")
             data = pickle.loads(raw)
-        smiles = format_instruction_field(data.get("smiles"))
         response = str(data[self.property_key])
-        atoms = data["atoms"]
-        if isinstance(atoms, np.ndarray):
-            atoms = atoms.tolist()
-        atoms = [str(a) if not hasattr(a, "item") else str(a.item()) for a in atoms]
-        coords = np.asarray(data["coordinates"], dtype=np.float32)
-        if coords.ndim == 3:
-            coords = coords[0]
-        atoms, coords = _atoms_coords_remove_h_center(atoms, coords)
-        if self.use_polished_description and self.property_key == "homo_lumo_gap" and "polished_description" in data:
-            desc = data.get("polished_description")
-            if isinstance(desc, bytes):
-                desc = desc.decode("utf-8", errors="ignore")
-            if desc is not None:
-                desc = str(desc).strip()
-            if desc:
-                user_content = f"{desc}\n{self.instruction} {smiles}"
-            else:
-                user_content = f"{self.instruction} {smiles}"
-        else:
-            user_content = f"{self.instruction} {smiles}"
+        atoms, coords = atoms_coords_from_record(data)
+        user_content = resolve_user_content(
+            self.task_name,
+            data,
+            mode="single_token",
+            use_polished_description=self.use_polished_description,
+            instruction_override=self.instruction,
+        )
         ids = tokenize_generation_sample_object_ref(self.tokenizer, user_content, response)
         return {**ids, "atoms": atoms, "coordinates": coords}
