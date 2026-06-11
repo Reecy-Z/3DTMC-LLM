@@ -41,14 +41,14 @@ Checkpoints and Stage 1 data for **3DTMC-LLM** are published on Hugging Face und
 
 **Closed-source LLM settings** (official vendor APIs; pinned snapshot IDs, access dates, and inference parameters for reproducibility).
 
-| Model | Role | Vendor | API | Snapshot ID | Access date | Inference settings |
+| Model | Role | Vendor | API | Model ID/Snapshot ID | Access date | Inference settings |
 |-------|------|--------|-----|-------------|-------------|-------------------|
 | GPT-4o | Data gen. — description polishing | OpenAI | [Chat Completions API](https://developers.openai.com/api/docs/models/gpt-4o) | `gpt-4o-2024-11-20` | 17 Jan 2026 | `temperature=0`, `top_p=1.0`; max output tokens: API default |
 | GPT-4o | Data gen. — QA synthesis | OpenAI | [Chat Completions API](https://developers.openai.com/api/docs/models/gpt-4o) | `gpt-4o-2024-11-20` | 20 Jan 2026 | `temperature=0`, `top_p=1.0`; max output tokens: API default |
-| GPT-5.2 | Baseline — Q&A/description generation | OpenAI | [Responses API](https://developers.openai.com/api/docs/guides/migrate-to-responses) | `gpt-5.2-2025-12-11` | 29 Jan 2026 | (`reasoning.effort=none`); other inference parameters API default |
-| GPT-5.5 | Evaluator — Q&A | OpenAI | [Responses API](https://developers.openai.com/api/docs/guides/migrate-to-responses) | `gpt-5.5-2026-04-23` | 4 Jun 2026 | `medium` (`reasoning.effort`); other inference parameters API default |
-| Claude Opus 4.7 | Evaluator — Q&A | Anthropic | [Messages API](https://platform.claude.com/docs/en/about-claude/models/overview) | `claude-opus-4-7` | 4 Jun 2026 | `medium` (`output_config.effort`); other inference parameters API default |
-| Gemini 3.5 Flash | Evaluator — Q&A | Google | [generateContent API](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash) | `gemini-3.5-flash` | 4 Jun 2026 | `medium` (`thinking_level`); other inference parameters API default |
+| GPT-5.2 | Baseline — Q&A/description generation | OpenAI | [Responses API](https://developers.openai.com/api/docs/guides/migrate-to-responses) | `gpt-5.2-2025-12-11` | 29 Jan 2026 | `reasoning.effort=none`; other inference parameters API default |
+| GPT-5.5 | Evaluator — Q&A | OpenAI | [Responses API](https://developers.openai.com/api/docs/guides/migrate-to-responses) | `gpt-5.5-2026-04-23` | 4 Jun 2026 | `reasoning.effort=medium`; other inference parameters API default |
+| Claude Opus 4.7 | Evaluator — Q&A | Anthropic | [Messages API](https://platform.claude.com/docs/en/about-claude/models/overview) | `claude-opus-4-7` | 4 Jun 2026 | effort setting: medium; other inference parameters API default |
+| Gemini 3.5 Flash | Evaluator — Q&A | Google | [generateContent API](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash) | `gemini-3.5-flash` | 4 Jun 2026 | `thinkingLevel=medium`; other inference parameters API default |
 
 ---
 
