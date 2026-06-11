@@ -39,6 +39,19 @@ Checkpoints and Stage 1 data for **3DTMC-LLM** are published on Hugging Face und
 - **`datasets_generation/enrich_description.py`** — starting from an LMDB with **`description`** and **`smiles`**, calls an OpenAI-compatible LLM and writes polished text to **`enriched_description`**. Use this workflow to build a **TMC-Prop3D-Enriched** dataset (enriched descriptions in LMDB) for Stage 2 training.
 - **`datasets_generation/generate_QA_pairs.py`** — loads knowledge-source files (e.g. PDF, TXT, Markdown), splits into chunks, and uses the Chat Completions API to generate **Q&A pairs** saved for Stage 2 training.
 
+**Closed-source LLM settings** (official vendor APIs; pinned snapshot IDs, access dates, and inference parameters for reproducibility).
+
+| Model | Role | Vendor | API | Snapshot ID | Access date | Max output tokens | Sampling / deterministic setting |
+|-------|------|--------|-----|-------------|-------------|-------------------|----------------------------------|
+| GPT-4o | Data gen. — description polishing | OpenAI | [Chat Completions API](https://developers.openai.com/api/docs/models/gpt-4o) | `gpt-4o-2024-11-20` | 17 Jan 2026 | API default | `temperature=0`, `top_p=1.0` |
+| GPT-4o | Data gen. — QA synthesis | OpenAI | [Chat Completions API](https://developers.openai.com/api/docs/models/gpt-4o) | `gpt-4o-2024-11-20` | 20 Jan 2026 | API default | `temperature=0`, `top_p=1.0` |
+| GPT-5.2 | Baseline — description generation (vs. 3DTMC-LLM) | OpenAI | [Chat Completions API](https://developers.openai.com/api/docs/models/gpt-5.2) | `gpt-5.2-2025-12-11` | 29 Jan 2026 | API default | `temperature=0`, `top_p=1.0` |
+| GPT-5.5 | Evaluator — structured information extraction | OpenAI | [Chat Completions API](https://developers.openai.com/api/docs/models/gpt-5.5) | `gpt-5.5-2026-04-23` | 4 Jun 2026 | API default | `temperature=0`, `top_p=1.0` |
+| Claude Opus 4.7 | Evaluator — structured information extraction | Anthropic | [Messages API](https://platform.claude.com/docs/en/about-claude/models/overview) | `claude-opus-4-7` | 4 Jun 2026 | API default | `temperature=0`, `top_p=1.0` |
+| Gemini 3.5 Flash | Evaluator — structured information extraction | Google | [generateContent API](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash) | `gemini-3.5-flash` | 4 Jun 2026 | API default | `temperature=0`, `top_p=1.0` |
+
+Except for `temperature=0` and `top_p=1.0`, all other inference parameters (including `max_tokens`) were left at the API/provider defaults.
+
 ---
 
 ## 1. 3D encoder
